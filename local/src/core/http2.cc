@@ -732,7 +732,7 @@ on_stream_close_cb(
     void *user_data)
 {
   Errata errata;
-  errata.diag("Stream is closed with id: {}", stream_id);
+  errata.diag("HTTP/2 Stream is closed with id: {}", stream_id);
   H2Session *session_data = reinterpret_cast<H2Session *>(user_data);
   auto iter = session_data->_stream_map.find(stream_id);
   if (iter != session_data->_stream_map.end()) {
@@ -770,7 +770,6 @@ on_data_chunk_recv_cb(
     return 0;
   }
   H2StreamState &stream_state = *iter->second;
-  stream_state._received_body_length += len;
   errata.diag(
       "Drained HTTP/2 body for transaction with key: {}, stream id: {} "
       "of {} bytes with content: {}",
@@ -1026,6 +1025,7 @@ H2Session::write(HttpHeader const &hdr)
       stream_state->set_stream_id(stream_id);
       record_stream_state(stream_id, new_stream_state);
     }
+    // TODO: Move this up to when submit succeeded?
     zret.diag("Sent the following HTTP/2 headers for stream id {}:\n{}", stream_id, hdr);
   }
 

@@ -8,6 +8,7 @@
 #include "core/ArgParser.h"
 #include "core/http.h"
 #include "core/http2.h"
+#include "core/http3.h"
 #include "core/https.h"
 #include "core/ProxyVerifier.h"
 #include "core/YamlParser.h"
@@ -91,12 +92,28 @@ struct TargetSelector
     return https_target;
   }
 
+  /** Round robin retrieval of HTTPS addresses. */
+  swoc::IPEndpoint const *
+  get_http3_target()
+  {
+    if (http3_targets.empty()) {
+      return nullptr;
+    }
+    auto const *http3_target = &http3_targets[http3_target_index];
+    if (++http3_target_index >= http3_targets.size()) {
+      http3_target_index = 0;
+    }
+    return http3_target;
+  }
+
   std::deque<swoc::IPEndpoint> http_targets;
   std::deque<swoc::IPEndpoint> https_targets;
+  std::deque<swoc::IPEndpoint> http3_targets;
 
 private:
   size_t http_target_index = 0;
   size_t https_target_index = 0;
+  size_t http3_target_index = 0;
 };
 
 TargetSelector Target_Selector;
@@ -247,10 +264,12 @@ ClientReplayFileHandler::ssn_open(YAML::Node const &node)
       errata.note(std::move(http_node.errata()));
       return errata;
     }
-    if (http_node.result().IsDefined() && http_node.result()[YAML_SSN_PROTOCOL_VERSION] &&
-        http_node.result()[YAML_SSN_PROTOCOL_VERSION].Scalar() == "2")
-    {
-      _ssn->is_h2 = true;
+    if (http_node.result().IsDefined() && http_node.result()[YAML_SSN_PROTOCOL_VERSION]) {
+      if (http_node.result()[YAML_SSN_PROTOCOL_VERSION].Scalar() == "2") {
+        _ssn->is_h2 = true;
+      } else if (http_node.result()[YAML_SSN_PROTOCOL_VERSION].Scalar() == "3") {
+        _ssn->is_h3 = true;
+      }
     }
   }
 
@@ -333,6 +352,7 @@ ClientReplayFileHandler::client_request(YAML::Node const &node)
   swoc::Errata errata;
   if (!Use_Proxy_Request_Directives) {
     _txn._req._is_http2 = _ssn->is_h2;
+    _txn._req._is_http3 = _ssn->is_h3;
     errata.note(YamlParser::populate_http_message(node, _txn._req));
     if (_txn._req._method.empty()) {
       errata.error(R"(client-request node without a method at "{}":{}.)", _path, node.Mark().line);
@@ -361,6 +381,7 @@ ClientReplayFileHandler::proxy_request(YAML::Node const &node)
   swoc::Errata errata;
   if (Use_Proxy_Request_Directives) {
     _txn._req._is_http2 = _ssn->is_h2;
+    _txn._req._is_http3 = _ssn->is_h3;
     errata.note(YamlParser::populate_http_message(node, _txn._req));
     if (_txn._req._method.empty()) {
       errata.error(R"(proxy-request node without a method at "{}":{}.)", _path, node.Mark().line);
@@ -390,6 +411,7 @@ ClientReplayFileHandler::proxy_response(YAML::Node const &node)
     // We only expect proxy responses when we are behaving according to the
     // client-request directives and there is a proxy.
     _txn._rsp._is_http2 = _ssn->is_h2;
+    _txn._rsp._is_http3 = _ssn->is_h3;
     _txn._rsp._fields_rules = std::make_shared<HttpFields>(*global_config.txn_rules);
     return YamlParser::populate_http_message(node, _txn._rsp);
   }
@@ -404,6 +426,7 @@ ClientReplayFileHandler::server_response(YAML::Node const &node)
     // If we are behaving like the proxy, then replay-client is talking directly
     // with the server and should expect the server's responses.
     _txn._rsp._is_http2 = _ssn->is_h2;
+    _txn._rsp._is_http3 = _ssn->is_h3;
     _txn._rsp._fields_rules = std::make_shared<HttpFields>(*global_config.txn_rules);
     errata.note(YamlParser::populate_http_message(node, _txn._rsp));
     if (_txn._rsp._status == 0) {
@@ -497,9 +520,17 @@ Run_Session(Ssn const &ssn, TargetSelector &target_selector)
       R"(Starting session "{}":{} protocol={}.)",
       ssn._path,
       ssn._line_no,
-      ssn.is_h2 ? "h2" : (ssn.is_tls ? "https" : "http"));
+      ssn.is_h3 ? "h3" : (ssn.is_h2 ? "h2" : (ssn.is_tls ? "https" : "http")));
 
-  if (ssn.is_h2) {
+  if (ssn.is_h3) {
+    real_target = target_selector.get_http3_target();
+    if (real_target == nullptr) {
+      errata.error("Could not replay an HTTP/3 session because no HTTP/3 ports are provided.");
+    } else {
+      session = std::make_unique<H3Session>(ssn._client_sni, ssn._client_verify_mode);
+      errata.diag("Connecting via HTTP/3 over TLS.");
+    }
+  } else if (ssn.is_h2) {
     real_target = target_selector.get_https_target();
     if (real_target == nullptr) {
       errata.error("Could not replay an HTTP/2 session because no HTTPS ports are provided.");
@@ -581,8 +612,10 @@ Engine::command_run()
 
   auto server_addr_http_arg{arguments.get("connect-http")};
   auto server_addr_https_arg{arguments.get("connect-https")};
-  if (!server_addr_http_arg && !server_addr_https_arg) {
-    errata.error(R"(Must provide either "--connect-http" and/or "--connect-https" arguments")");
+  auto server_addr_http3_arg{arguments.get("connect-http3")};
+  if (!server_addr_http_arg && !server_addr_https_arg && !server_addr_http3_arg) {
+    errata.error(
+        R"(Must provide one of "--connect-http", "--connect-https", or "--connect-http3" arguments")");
     process_exit_code = 1;
     return;
   }
@@ -597,6 +630,14 @@ Engine::command_run()
 
   if (server_addr_https_arg) {
     errata.note(resolve_ips(server_addr_https_arg[0], Target_Selector.https_targets));
+    if (!errata.is_ok()) {
+      process_exit_code = 1;
+      return;
+    }
+  }
+
+  if (server_addr_http3_arg) {
+    errata.note(resolve_ips(server_addr_http3_arg[0], Target_Selector.http3_targets));
     if (!errata.is_ok()) {
       process_exit_code = 1;
       return;
@@ -670,6 +711,8 @@ Engine::command_run()
   TLSSession::init();
   errata.diag(R"(Initialize H2)");
   H2Session::init(&process_exit_code);
+  errata.diag(R"(Initialize H3)");
+  H3Session::init(&process_exit_code);
 
   auto sleep_limit_arg{arguments.get("sleep-limit")};
   microseconds sleep_limit = 500ms;
@@ -871,6 +914,13 @@ main(int /* argc */, char const *argv[])
           "--connect-https",
           "",
           "TLS address and port to connect on. Can be a comma separated list.",
+          "",
+          1,
+          "")
+      .add_option(
+          "--connect-http3",
+          "",
+          "HTTP/3 address and port to connect on. Can be a comma separated list.",
           "",
           1,
           "")

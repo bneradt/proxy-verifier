@@ -35,6 +35,7 @@ Table of Contents
                * [Building on CentOS 8](#building-on-centos-8)
                * [Building on CentOS 7](#building-on-centos-7)
             * [ASan Instrumentation](#asan-instrumentation)
+            * [QUIC/HTTP3 Support](#quichttp3-support)
          * [Running the Tests](#running-the-tests)
             * [Unit Tests](#unit-tests)
             * [Gold Tests](#gold-tests)
@@ -1101,6 +1102,41 @@ pipenv run scons \
     --with-nghttp2=/path/to/nghttp2 \
     --cfg=release \
     --enable-asan \
+    proxy-verifier
+```
+
+#### QUIC/HTTP3 Support
+
+TODO: This is a work in progress. Update as the project develops.
+
+Proxy Verifier (WILL SOMEDAY, LORD WILLING) supports HTTP/3. The implemenation of this relies
+upon the following libraries:
+
+* A version of OpenSSL that supports QUIC.
+* ngtcp2 for its QUIC support
+* nghttp3 for its HTTP/3 support.
+
+A tool is provided to build these libraries:
+[build_http3_dependencies.sh](https://github.com/yahoo/proxy-verifier/blob/master/tools/build_http3_dependencies.sh)
+
+Here is an example session, tested on MacOS BugSur and CentOS 7, that builds
+Proxy Verifier with QUIC/HTTP3 support:
+
+```
+# Alter this for your desired library location.
+quic_libs_root=${HOME}/src/http3_libs
+
+bash ./tools/build_http3_dependencies.sh ${quic_libs_root}
+
+# Replace '/path/to/nghttp2' to your location of the installed nghttp2
+# location.
+pipenv run scons \
+    -j8 \
+    --cfg=release \
+    --with-ssl=${quic_libs_root}/openssl_build/ \
+    --with-ngtcp2=${quic_libs_root}/ngtcp2_build/ \
+    --with-nghttp3=${quic_libs_root}/nghttp3_build/ \
+    --with-nghttp2=/path/to/nghttp2 \
     proxy-verifier
 ```
 

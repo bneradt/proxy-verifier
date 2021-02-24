@@ -18,6 +18,9 @@ autest = "==1.7.4"
 hyper = "*"
 pyOpenSSL = "*"
 eventlet = "*"
+asyncio = "*"
+aioquic = "*"
+wsproto = "*"
 
 [requires]
 python_version = "3"

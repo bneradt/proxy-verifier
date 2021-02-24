@@ -28,6 +28,8 @@ constexpr unsigned char protocol_negotiation_string[] =
     {2, 'h', '2', 7, 'h', 't', 't', 'p', '1', '.', '1'};
 constexpr int protocol_negotiation_len = sizeof(protocol_negotiation_string);
 
+int client_hello_callback(SSL *ssl, int * /* al */, void * /* arg */);
+
 /** The callback for SSL_CTX_set_alpn_select_cb.
  *
  * This sets the protocols that the server will negotiate via ALPN.
@@ -270,26 +272,7 @@ public:
    */
   static swoc::Errata configure_ca_cert(std::string_view cert_path);
 
-public:
-  /// The client or server public key file. This may also contain the private
-  /// key.
-  static swoc::file::path certificate_file;
-
-  /// The client or server private key file if not in the certificate_file.
-  static swoc::file::path privatekey_file;
-
-  /// The CA file which may contain mutiple CA certs.
-  static swoc::file::path ca_certificate_file;
-
-  /// The CA directory containing one or more CA cert files.
-  static swoc::file::path ca_certificate_dir;
-
-protected:
-  static swoc::Errata client_init(SSL_CTX *&client_context);
-  static swoc::Errata server_init(SSL_CTX *&server_context);
-  static void terminate(SSL_CTX *&context);
-
-  /** A helper file to configure a host certificate.
+  /** Configure a host certificate.
    *
    * @param[in] cert_path The path to a directory with private and public key
    * files or the path to a file with both the private and public keys.
@@ -314,6 +297,25 @@ protected:
    * @return An errata indicating the status of the configuration.
    */
   static swoc::Errata configure_certificates(SSL_CTX *&context);
+
+public:
+  /// The client or server public key file. This may also contain the private
+  /// key.
+  static swoc::file::path certificate_file;
+
+  /// The client or server private key file if not in the certificate_file.
+  static swoc::file::path privatekey_file;
+
+  /// The CA file which may contain mutiple CA certs.
+  static swoc::file::path ca_certificate_file;
+
+  /// The CA directory containing one or more CA cert files.
+  static swoc::file::path ca_certificate_dir;
+
+protected:
+  static swoc::Errata client_init(SSL_CTX *&client_context);
+  static swoc::Errata server_init(SSL_CTX *&server_context);
+  static void terminate(SSL_CTX *&context);
 
 protected:
   SSL *_ssl = nullptr;

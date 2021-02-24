@@ -209,6 +209,27 @@ HttpFields::add_fields_to_ngnva(nghttp2_nv *l) const
   }
 }
 
+void
+HttpFields::add_fields_to_ngnva(nghttp3_nv *l) const
+{
+  int offset = 0;
+  for (auto const &[key, value] : _fields_sequence) {
+    if (key.starts_with(":")) {
+      // Pseudo header fields are handled specially via the _method, _status
+      // HttpHeader member variables. This provides continuity in
+      // implementation with HTTP/1. In any case, they are added to the vector
+      // independently.
+      continue;
+    }
+    l[offset++] = nghttp3_nv{
+        const_cast<uint8_t *>((uint8_t *)key.data()),
+        const_cast<uint8_t *>((uint8_t *)value.data()),
+        key.length(),
+        value.length(),
+        NGHTTP2_NV_FLAG_NONE};
+  }
+}
+
 swoc::Errata
 HttpHeader::parse_url(TextView url)
 {

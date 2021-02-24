@@ -13,6 +13,7 @@
 #include <list>
 #include <map>
 #include <nghttp2/nghttp2.h>
+#include <nghttp3/nghttp3.h>
 #include <openssl/ssl.h>
 #include <poll.h>
 #include <string>
@@ -139,7 +140,7 @@ public:
    */
   void merge(self_type const &other);
 
-  /** Convert _fields into nghttp2_nv and add them to the vector provided
+  /** Convert _fields into nghttp2_nv and add them to the provided vector.
    *
    * This assumes that the pseudo header fields are handled separately.  If
    * such fields are in the _fields container they are not added here to the
@@ -148,6 +149,16 @@ public:
    * @param[out] l vector of nghttp2_nv structs to populate from _fields.
    */
   void add_fields_to_ngnva(nghttp2_nv *l) const;
+
+  /** Convert _fields into nghttp3_nv and add them to the provided vector.
+   *
+   * This assumes that the pseudo header fields are handled separately.  If
+   * such fields are in the _fields container they are not added here to the
+   * nghttp3_nv vector.
+   *
+   * @param[out] l vector of nghttp3_nv structs to populate from _fields.
+   */
+  void add_fields_to_ngnva(nghttp3_nv *l) const;
 
   friend class HttpHeader;
 };
@@ -240,6 +251,9 @@ public:
    * @param[in] other The HttpFields from which to add fields and rules.
    */
   void merge(HttpFields const &other);
+
+  /// Whether this is an HTTP/3 message.
+  bool _is_http3 = false;
 
   /// Whether this is an HTTP/2 message.
   bool _is_http2 = false;
@@ -388,6 +402,7 @@ struct Ssn
   int _client_verify_mode = SSL_VERIFY_NONE;
   bool is_tls = false;
   bool is_h2 = false;
+  bool is_h3 = false;
 
   swoc::Errata post_process_transactions();
 };

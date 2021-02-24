@@ -486,7 +486,7 @@ TLSSession::terminate()
   TLSSession::terminate(server_context);
 }
 
-static int
+int
 client_hello_callback(SSL *ssl, int * /* al */, void * /* arg */)
 {
   int ret = SSL_CLIENT_HELLO_SUCCESS;

@@ -64,10 +64,9 @@ public:
   void store_nv_request_headers_to_free(nghttp2_nv *hdrs);
 
 public:
-  size_t _send_body_offset = 0;
   char const *_body_to_send = nullptr;
   size_t _send_body_length = 0;
-  size_t _received_body_length = 0;
+  size_t _send_body_offset = 0;
   bool _wait_for_continue = false;
   std::string _key;
   /** The composed URL parts from :method, :authority, and :path pseudo headers
@@ -121,8 +120,12 @@ public:
   swoc::Errata connect() override;
   static swoc::Errata init(int *process_exit_code);
   static void terminate();
+
+  /** Perform the HTTP/2 (nghttp2) configuration for a client connection. */
   swoc::Errata client_session_init();
+  /** Perform the HTTP/2 (nghttp2) configuration for a server connection. */
   swoc::Errata server_session_init();
+
   swoc::Errata send_connection_settings();
   swoc::Errata run_transactions(
       std::list<Txn> const &txn,
