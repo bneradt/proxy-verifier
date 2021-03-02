@@ -1248,6 +1248,10 @@ Session::do_connect(swoc::IPEndpoint const *real_target)
           setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, &ONE, sizeof(ONE));
           if (0 == ::fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK)) {
             errata.note(this->connect());
+            if (this->is_closed()) {
+              // We inserted our random disconnect.
+              return this->do_connect(real_target);
+            }
           } else {
             errata.error(
                 R"(Failed to make the client socket non-blocking {}: - {})",

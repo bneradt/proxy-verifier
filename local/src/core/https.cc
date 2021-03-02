@@ -8,6 +8,7 @@
 #include "core/https.h"
 #include "core/ProxyVerifier.h"
 
+#include <cstdlib>
 #include <dirent.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -27,6 +28,16 @@ using namespace std::literals;
 
 namespace chrono = std::chrono;
 using chrono::milliseconds;
+
+
+
+constexpr auto MAX_DISCONNECT_SLEEP_DURATION = 10'000;
+constexpr auto DISCONNECT_RATE = 4;
+
+using std::this_thread::sleep_for;
+using ClockType = std::chrono::system_clock;
+using chrono::duration_cast;
+using chrono::microseconds;
 
 std::unordered_map<std::string, TLSHandshakeBehavior> TLSSession::_handshake_behavior_per_sni;
 
@@ -404,8 +415,20 @@ TLSSession::connect(SSL_CTX *client_context)
         _client_verify_mode);
     SSL_set_verify(_ssl, _client_verify_mode, nullptr /* No verify_callback is passed */);
   }
+  //auto const start = ClockType::now();
   int retval = SSL_connect(_ssl);
   while (retval < 0) {
+
+    auto const one_to_hundred = uni_rate(rng);
+    if (one_to_hundred <= DISCONNECT_RATE) {
+      auto const disconnect_delay_us = uni_delay(rng);
+      auto const disconnect_delay = microseconds{disconnect_delay_us};
+      sleep_for(disconnect_delay);
+      this->close();
+      std::cout << "Disconnected after " << disconnect_delay_us << " us" << std::endl;
+      return errata;
+    }
+
     auto const ssl_error = SSL_get_error(_ssl, retval);
     // Since there are multiple parts to the handshake, we may have to poll multiple
     // times to finish the accept.
@@ -438,6 +461,8 @@ TLSSession::connect(SSL_CTX *client_context)
     // Poll succeeded.
     retval = SSL_connect(_ssl);
   }
+  //auto const end = ClockType::now();
+  //std::cout << "Handshake took: " << duration_cast<microseconds>(end - start).count() << " us" << std::endl;
 
   auto const verify_result = SSL_get_verify_result(_ssl);
   errata.diag(
@@ -465,6 +490,13 @@ swoc::file::path TLSSession::ca_certificate_file;
 swoc::file::path TLSSession::ca_certificate_dir;
 SSL_CTX *TLSSession::server_context = nullptr;
 SSL_CTX *TLSSession::client_context = nullptr;
+
+
+
+std::random_device TLSSession::rd;
+std::mt19937 TLSSession::rng(rd());
+std::uniform_int_distribution<int> TLSSession::uni_delay(0, MAX_DISCONNECT_SLEEP_DURATION);
+std::uniform_int_distribution<int> TLSSession::uni_rate(0, 100);
 
 // static
 Errata

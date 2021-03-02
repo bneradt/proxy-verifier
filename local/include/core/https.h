@@ -11,6 +11,13 @@
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+
+
+
+#include <random>
+
+
+
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -317,6 +324,11 @@ protected:
 
 protected:
   SSL *_ssl = nullptr;
+  static std::random_device rd;
+  static std::mt19937 rng;
+  static std::uniform_int_distribution<int> uni_delay;
+  static std::uniform_int_distribution<int> uni_rate;
+
   /** The SNI to be sent by the client (as opposed to the one expected by the
    * server from the proxy). This only applies to the client.
    */

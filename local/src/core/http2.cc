@@ -209,7 +209,7 @@ H2Session::connect()
 {
   // Complete the TLS handshake
   Errata errata = super_type::connect(h2_client_context);
-  if (!errata.is_ok()) {
+  if (this->is_closed() || !errata.is_ok()) {
     return errata;
   }
   unsigned char const *alpn = nullptr;
