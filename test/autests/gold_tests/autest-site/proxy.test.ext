@@ -13,7 +13,7 @@ import os
 
 def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
                      use_ssl=False, https_pem=None, ca_pem=None, use_http2_to_1=False,
-                     use_http2_to_2=False):
+                     use_http2_to_2=False, use_http3=False):
     """
     Configure the provided process to run the proxy command.
 
@@ -25,8 +25,11 @@ def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
         For all other arguments, see MakeProxyProcess
     """
 
-    if use_http2_to_1 and use_http2_to_2:
-        raise ValueError("Cannot specify both use_http2_to_1 and use_http2_to_2 parameters.")
+    use_protocol_list = [use_http2_to_1, use_http2_to_2, use_http3]
+    if use_protocol_list.count(True) > 1:
+        raise ValueError(
+                "Cannot specify multiple of use_http2_to_1, "
+                "use_http2_to_2, and use_http3 parameters.")
 
     proxy_rundir = os.path.join(obj.RunDirectory, name)
     process.Setup.MakeDir(proxy_rundir)
@@ -72,6 +75,9 @@ def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
     if use_http2_to_2:
         command += " --http2_to_2"
 
+    if use_http3:
+        command += " --http3"
+
     process.Setup.Copy(proxy_src, proxy_dest, CopyLogic.SoftFiles)
     process.Command = command
 
@@ -111,6 +117,9 @@ def MakeProxyProcess(test, name, listen_port=8080, server_port=8081,
         use_http2_to_2: (bool) True if the connection should expect HTTP/2
         traffic for the client and also send HTTP/2 to the server, false otherwise.
 
+        use_http3: (bool) True if the connection should expect HTTP/3 traffic
+        from the client and send HTTP/3 traffic to the server.
+
     Returns:
         The newly created proxy Process.
     """
@@ -122,7 +131,7 @@ def MakeProxyProcess(test, name, listen_port=8080, server_port=8081,
 
 def AddProxyProcess(run, name, listen_port=8080, server_port=8081,
                     use_ssl=False, https_pem=None, ca_pem=None, use_http2_to_1=False,
-                    use_http2_to_2=False):
+                    use_http2_to_2=False, use_http3=False):
     """
     Create a proxy Process and add it to the provided TestRun.
 
@@ -136,7 +145,8 @@ def AddProxyProcess(run, name, listen_port=8080, server_port=8081,
     """
     proxy = run.Processes.Process(name)
     _configure_proxy(run, proxy, name, listen_port, server_port,
-                     use_ssl, https_pem, ca_pem, use_http2_to_1, use_http2_to_2)
+                     use_ssl, https_pem, ca_pem, use_http2_to_1, use_http2_to_2,
+                     use_http3)
 
     client = run.Processes.Default
     client.StartBefore(proxy)

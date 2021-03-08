@@ -48,7 +48,7 @@ using chrono::milliseconds;
 using chrono::nanoseconds;
 
 /** The byte used for initialization of structures. */
-constexpr auto INITIALIZATION_BYTE = 0xad;
+constexpr auto INITIALIZATION_BYTE = 0x0;
 
 constexpr auto QUIC_MAX_STREAMS = 256 * 1024;
 constexpr auto QUIC_MAX_DATA = 1 * 1024 * 1024;
