@@ -37,6 +37,7 @@
 
 using swoc::Errata;
 using swoc::TextView;
+using swoc::bwf::Ngtcp2Error;
 using namespace swoc::literals;
 using namespace std::literals;
 using std::this_thread::sleep_for;
@@ -64,6 +65,84 @@ int *H3Session::process_exit_code = nullptr;
 std::random_device QuicSocket::rd;
 std::mt19937 QuicSocket::rng(rd());
 std::uniform_int_distribution<int> QuicSocket::uni_id(0, std::numeric_limits<uint8_t>::max());
+
+namespace swoc
+{
+inline namespace SWOC_VERSION_NS
+{
+BufferWriter &
+bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error)
+{
+  // Hand rolled, might not be totally compliant everywhere, but probably close
+  // enough. The long string will be locally accurate. Clang requires the double
+  // braces.
+  static const std::unordered_map<int, std::string_view> SHORT_NAME =
+{
+{-201, "NGTCP2_ERR_INVALID_ARGUMENT"},
+{-203, "NGTCP2_ERR_NOBUF"},
+{-205, "NGTCP2_ERR_PROTO"},
+{-206, "NGTCP2_ERR_INVALID_STATE"},
+{-207, "NGTCP2_ERR_ACK_FRAME"},
+{-208, "NGTCP2_ERR_STREAM_ID_BLOCKED"},
+{-209, "NGTCP2_ERR_STREAM_IN_USE"},
+{-210, "NGTCP2_ERR_STREAM_DATA_BLOCKED"},
+{-211, "NGTCP2_ERR_FLOW_CONTROL"},
+{-212, "NGTCP2_ERR_CONNECTION_ID_LIMIT"},
+{-213, "NGTCP2_ERR_STREAM_LIMIT"},
+{-214, "NGTCP2_ERR_FINAL_SIZE"},
+{-215, "NGTCP2_ERR_CRYPTO"},
+{-216, "NGTCP2_ERR_PKT_NUM_EXHAUSTED"},
+{-217, "NGTCP2_ERR_REQUIRED_TRANSPORT_PARAM"},
+{-218, "NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM"},
+{-219, "NGTCP2_ERR_FRAME_ENCODING"},
+{-220, "NGTCP2_ERR_TLS_DECRYPT"},
+{-221, "NGTCP2_ERR_STREAM_SHUT_WR"},
+{-222, "NGTCP2_ERR_STREAM_NOT_FOUND"},
+{-226, "NGTCP2_ERR_STREAM_STATE"},
+{-229, "NGTCP2_ERR_RECV_VERSION_NEGOTIATION"},
+{-230, "NGTCP2_ERR_CLOSING"},
+{-231, "NGTCP2_ERR_DRAINING"},
+{-234, "NGTCP2_ERR_TRANSPORT_PARAM"},
+{-235, "NGTCP2_ERR_DISCARD_PKT"},
+{-236, "NGTCP2_ERR_PATH_VALIDATION_FAILED"},
+{-237, "NGTCP2_ERR_CONN_ID_BLOCKED"},
+{-238, "NGTCP2_ERR_INTERNAL"},
+{-239, "NGTCP2_ERR_CRYPTO_BUFFER_EXCEEDED"},
+{-240, "NGTCP2_ERR_WRITE_MORE"},
+{-241, "NGTCP2_ERR_RETRY"},
+{-242, "NGTCP2_ERR_DROP_CONN"},
+{-243, "NGTCP2_ERR_AEAD_LIMIT_REACHED"},
+{-244, "NGTCP2_ERR_NO_VIABLE_PATH"},
+{-500, "NGTCP2_ERR_FATAL"},
+{-501, "NGTCP2_ERR_NOMEM"},
+{-502, "NGTCP2_ERR_CALLBACK_FAILURE"},
+};
+
+  auto short_name = [](int n) -> std::string_view {
+    if (n > -201 || n < -502) {
+      return "Unknown ngtcp2 error";
+    }
+    auto spot = SHORT_NAME.find(n);
+    if (spot == SHORT_NAME.end()) {
+      return "Unknown ngtcp2 error";
+    }
+    return spot->second;
+  };
+  static const bwf::Format number_fmt{"[{}]"sv}; // numeric value format.
+  if (spec.has_numeric_type()) {                 // if numeric type, print just the numeric
+                                                 // part.
+    w.print(number_fmt, error._e);
+  } else {
+    w.write(short_name(error._e));
+    if (spec._type != 's' && spec._type != 'S') {
+      w.write(' ');
+      w.print(number_fmt, error._e);
+    }
+  }
+  return w;
+}
+} // namespace SWOC_VERSION_NS
+} // namespace swoc
 
 // --------------------------------------------
 // Begin ngtcp2 callbacks.
@@ -710,10 +789,13 @@ static int
 initialize_nghttp3_connection(H3Session *session)
 {
   int rc = 0;
+  Errata errata;
   auto& qs = session->_quic_socket;
   int64_t ctrl_stream_id = 0, qpack_enc_stream_id = 0, qpack_dec_stream_id = 0;
 
-  if (ngtcp2_conn_get_max_local_streams_uni(qs.qconn) < 3) {
+  auto const max_streams = ngtcp2_conn_get_max_local_streams_uni(qs.qconn);
+  if (max_streams < 3) {
+    errata.error("Too few max streams: {}", max_streams);
     return 1;
   }
 
@@ -726,31 +808,37 @@ initialize_nghttp3_connection(H3Session *session)
       nghttp3_mem_default(),
       session);
   if (rc != 0) {
+    errata.error("nghttp3_conn_client_new failed: {}", Ngtcp2Error{rc});
     return FAILED;
   }
 
   rc = ngtcp2_conn_open_uni_stream(qs.qconn, &ctrl_stream_id, nullptr);
   if (rc != 0) {
+    errata.error("ngtcp2_conn_open_uni_stream failed: {}", Ngtcp2Error{rc});
     return FAILED;
   }
 
   rc = nghttp3_conn_bind_control_stream(qs.h3conn, ctrl_stream_id);
   if (rc != 0) {
+    errata.error("nghttp3_conn_bind_control_stream failed: {}", Ngtcp2Error{rc});
     return FAILED;
   }
 
   rc = ngtcp2_conn_open_uni_stream(qs.qconn, &qpack_enc_stream_id, nullptr);
   if (rc != 0) {
+    errata.error("ngtcp2_conn_open_uni_stream failed: {}", Ngtcp2Error{rc});
     return FAILED;
   }
 
   rc = ngtcp2_conn_open_uni_stream(qs.qconn, &qpack_dec_stream_id, nullptr);
   if (rc != 0) {
+    errata.error("ngtcp2_conn_open_uni_stream failed: {}", Ngtcp2Error{rc});
     return FAILED;
   }
 
   rc = nghttp3_conn_bind_qpack_streams(qs.h3conn, qpack_enc_stream_id, qpack_dec_stream_id);
   if (rc != 0) {
+    errata.error("nghttp3_conn_bind_qpack_streams failed: {}", Ngtcp2Error{rc});
     return FAILED;
   }
 
@@ -915,6 +1003,14 @@ H3Session::get_a_stream_has_ended() const
 {
   return !_ended_streams.empty();
 }
+
+void
+H3Session::record_stream_state(int64_t stream_id, std::shared_ptr<H3StreamState> stream_state)
+{
+  _stream_map[stream_id] = stream_state;
+  _last_added_stream = stream_state;
+}
+
 
 void
 H3Session::set_stream_has_ended(int64_t stream_id)
@@ -1215,8 +1311,9 @@ H3Session::write(HttpHeader const &hdr)
     stream_state = new_stream_state.get();
 
     auto const rc = ngtcp2_conn_open_bidi_stream(_quic_socket.qconn, &stream_id, nullptr);
-    if (rc) {
-      zret.error("Failed ngtcp2_conn_open_bidi_stream for key: {}", key);
+    if (rc != 0) {
+      zret.error("Failed ngtcp2_conn_open_bidi_stream for key {}, error code: {}",
+          key, Ngtcp2Error{rc});
       return zret;
     }
     stream_state->set_stream_id(stream_id);
@@ -1435,7 +1532,7 @@ H3Session::client_session_init()
       &_quic_socket.transport_params,
       nullptr,
       this /* The user_data in the ngtcp2 callbacks. */);
-  if (rc) {
+  if (rc != 0) {
     errata.error("ngtcp2_conn_client_new failed.");
     return errata;
   }

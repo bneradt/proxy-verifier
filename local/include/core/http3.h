@@ -29,6 +29,26 @@
 class HttpHeader;
 struct Txn;
 
+namespace swoc
+{
+inline namespace SWOC_VERSION_NS
+{
+namespace bwf
+{
+/** Format wrapper for @c ngtcp2 errors.
+ */
+struct Ngtcp2Error
+{
+  int _e;
+  explicit Ngtcp2Error(int e) : _e(e) { }
+};
+} // namespace bwf
+
+BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error);
+} // namespace SWOC_VERSION_NS
+} // namespace swoc
+
+
 // TODO: this is copied from curl's ngtcp2.h. That is a c file. Refactor using
 // C++ principles.
 class QuicHandshake
@@ -128,6 +148,7 @@ public:
    */
   swoc::TextView register_rcbuf(nghttp3_rcbuf *rcbuf);
 
+
 public:
   /// The key identifying this HTTP transaction.
   std::string key;
@@ -224,6 +245,8 @@ public:
   /// Whether an entire stream has been received and is ready for processing.
   bool get_a_stream_has_ended() const;
 
+  void record_stream_state(int64_t stream_id, std::shared_ptr<H3StreamState> stream_state);
+
 public:
   /// A mapping from stream_id to H3StreamState.
   std::unordered_map<int64_t, std::shared_ptr<H3StreamState>> _stream_map;
@@ -254,6 +277,8 @@ private:
 private:
   std::deque<int64_t> _ended_streams;
   swoc::IPEndpoint const *_endpoint = nullptr;
+
+  std::shared_ptr<H3StreamState> _last_added_stream;
 
 #ifndef OPENSSL_NO_NEXTPROTONEG
   static unsigned char next_proto_list[256];
