@@ -824,7 +824,7 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
 {
   Errata errata;
   int const socket_fd = socket(real_target->family(), SOCK_DGRAM, 0);
-  if (0 <= socket_fd) {
+  if (0 > socket_fd) {
     errata.error(R"(Failed to open a UDP socket - {})", swoc::bwf::Errno{});
     return errata;
   }
