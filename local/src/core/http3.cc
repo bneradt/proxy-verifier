@@ -76,47 +76,46 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error)
   // Hand rolled, might not be totally compliant everywhere, but probably close
   // enough. The long string will be locally accurate. Clang requires the double
   // braces.
-  static const std::unordered_map<int, std::string_view> SHORT_NAME =
-{
-{-201, "NGTCP2_ERR_INVALID_ARGUMENT"},
-{-203, "NGTCP2_ERR_NOBUF"},
-{-205, "NGTCP2_ERR_PROTO"},
-{-206, "NGTCP2_ERR_INVALID_STATE"},
-{-207, "NGTCP2_ERR_ACK_FRAME"},
-{-208, "NGTCP2_ERR_STREAM_ID_BLOCKED"},
-{-209, "NGTCP2_ERR_STREAM_IN_USE"},
-{-210, "NGTCP2_ERR_STREAM_DATA_BLOCKED"},
-{-211, "NGTCP2_ERR_FLOW_CONTROL"},
-{-212, "NGTCP2_ERR_CONNECTION_ID_LIMIT"},
-{-213, "NGTCP2_ERR_STREAM_LIMIT"},
-{-214, "NGTCP2_ERR_FINAL_SIZE"},
-{-215, "NGTCP2_ERR_CRYPTO"},
-{-216, "NGTCP2_ERR_PKT_NUM_EXHAUSTED"},
-{-217, "NGTCP2_ERR_REQUIRED_TRANSPORT_PARAM"},
-{-218, "NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM"},
-{-219, "NGTCP2_ERR_FRAME_ENCODING"},
-{-220, "NGTCP2_ERR_TLS_DECRYPT"},
-{-221, "NGTCP2_ERR_STREAM_SHUT_WR"},
-{-222, "NGTCP2_ERR_STREAM_NOT_FOUND"},
-{-226, "NGTCP2_ERR_STREAM_STATE"},
-{-229, "NGTCP2_ERR_RECV_VERSION_NEGOTIATION"},
-{-230, "NGTCP2_ERR_CLOSING"},
-{-231, "NGTCP2_ERR_DRAINING"},
-{-234, "NGTCP2_ERR_TRANSPORT_PARAM"},
-{-235, "NGTCP2_ERR_DISCARD_PKT"},
-{-236, "NGTCP2_ERR_PATH_VALIDATION_FAILED"},
-{-237, "NGTCP2_ERR_CONN_ID_BLOCKED"},
-{-238, "NGTCP2_ERR_INTERNAL"},
-{-239, "NGTCP2_ERR_CRYPTO_BUFFER_EXCEEDED"},
-{-240, "NGTCP2_ERR_WRITE_MORE"},
-{-241, "NGTCP2_ERR_RETRY"},
-{-242, "NGTCP2_ERR_DROP_CONN"},
-{-243, "NGTCP2_ERR_AEAD_LIMIT_REACHED"},
-{-244, "NGTCP2_ERR_NO_VIABLE_PATH"},
-{-500, "NGTCP2_ERR_FATAL"},
-{-501, "NGTCP2_ERR_NOMEM"},
-{-502, "NGTCP2_ERR_CALLBACK_FAILURE"},
-};
+  static const std::unordered_map<int, std::string_view> SHORT_NAME = {
+      {-201, "NGTCP2_ERR_INVALID_ARGUMENT"},
+      {-203, "NGTCP2_ERR_NOBUF"},
+      {-205, "NGTCP2_ERR_PROTO"},
+      {-206, "NGTCP2_ERR_INVALID_STATE"},
+      {-207, "NGTCP2_ERR_ACK_FRAME"},
+      {-208, "NGTCP2_ERR_STREAM_ID_BLOCKED"},
+      {-209, "NGTCP2_ERR_STREAM_IN_USE"},
+      {-210, "NGTCP2_ERR_STREAM_DATA_BLOCKED"},
+      {-211, "NGTCP2_ERR_FLOW_CONTROL"},
+      {-212, "NGTCP2_ERR_CONNECTION_ID_LIMIT"},
+      {-213, "NGTCP2_ERR_STREAM_LIMIT"},
+      {-214, "NGTCP2_ERR_FINAL_SIZE"},
+      {-215, "NGTCP2_ERR_CRYPTO"},
+      {-216, "NGTCP2_ERR_PKT_NUM_EXHAUSTED"},
+      {-217, "NGTCP2_ERR_REQUIRED_TRANSPORT_PARAM"},
+      {-218, "NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM"},
+      {-219, "NGTCP2_ERR_FRAME_ENCODING"},
+      {-220, "NGTCP2_ERR_TLS_DECRYPT"},
+      {-221, "NGTCP2_ERR_STREAM_SHUT_WR"},
+      {-222, "NGTCP2_ERR_STREAM_NOT_FOUND"},
+      {-226, "NGTCP2_ERR_STREAM_STATE"},
+      {-229, "NGTCP2_ERR_RECV_VERSION_NEGOTIATION"},
+      {-230, "NGTCP2_ERR_CLOSING"},
+      {-231, "NGTCP2_ERR_DRAINING"},
+      {-234, "NGTCP2_ERR_TRANSPORT_PARAM"},
+      {-235, "NGTCP2_ERR_DISCARD_PKT"},
+      {-236, "NGTCP2_ERR_PATH_VALIDATION_FAILED"},
+      {-237, "NGTCP2_ERR_CONN_ID_BLOCKED"},
+      {-238, "NGTCP2_ERR_INTERNAL"},
+      {-239, "NGTCP2_ERR_CRYPTO_BUFFER_EXCEEDED"},
+      {-240, "NGTCP2_ERR_WRITE_MORE"},
+      {-241, "NGTCP2_ERR_RETRY"},
+      {-242, "NGTCP2_ERR_DROP_CONN"},
+      {-243, "NGTCP2_ERR_AEAD_LIMIT_REACHED"},
+      {-244, "NGTCP2_ERR_NO_VIABLE_PATH"},
+      {-500, "NGTCP2_ERR_FATAL"},
+      {-501, "NGTCP2_ERR_NOMEM"},
+      {-502, "NGTCP2_ERR_CALLBACK_FAILURE"},
+  };
 
   auto short_name = [](int n) -> std::string_view {
     if (n > -201 || n < -502) {
@@ -558,7 +557,7 @@ cb_h3_readfunction(
   (void)veccnt;
 
   Errata errata;
-  auto *stream_state = reinterpret_cast<H3StreamState*>(stream_user_data);
+  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
 
   if (stream_state->wait_for_continue) {
     errata.diag(R"(Not sending body for "Expect: 100" request.)");
@@ -568,7 +567,7 @@ cb_h3_readfunction(
   // TODO: we won't need offset if things work this way. If things go wonky
   // with larger bodies, then we have to impart a cap and send in chunks. Then
   // the offset will be helpful.
-  vec[0].base = (uint8_t*)stream_state->body_to_send + stream_state->send_body_offset;
+  vec[0].base = (uint8_t *)stream_state->body_to_send + stream_state->send_body_offset;
   vec[0].len = stream_state->send_body_length - stream_state->send_body_offset;
   *pflags = NGHTTP3_DATA_FLAG_EOF;
 
@@ -592,7 +591,7 @@ cb_h3_acked_stream_data(
   // TODO: if send cb_h3_readfunction can really just populate base and len
   // like it's doing, this function probably doesn't even need to do what it's
   // doing.
-  auto *stream_state = reinterpret_cast<H3StreamState*>(stream_user_data);
+  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
   stream_state->send_body_offset += datalen;
   return 0;
 }
@@ -611,7 +610,7 @@ cb_h3_stream_close(
 
   Errata errata;
 
-  auto *session = reinterpret_cast<H3Session*>(conn_user_data);
+  auto *session = reinterpret_cast<H3Session *>(conn_user_data);
   // TODO: Make sure the stream really can be erased here. Is it's lifetime
   // managed by another holder of the H3StreamState pointer? (If needed.)
   session->_stream_map.erase(stream_id);
@@ -621,7 +620,7 @@ cb_h3_stream_close(
   /* make sure that ngh3_stream_recv is called again to complete the transfer
      even if there are no more packets to be received from the server. */
   // TODO: this looks important. Probably have to do a receive here?
-  //data->state.drain = 1;
+  // data->state.drain = 1;
   return 0;
 }
 
@@ -636,7 +635,7 @@ cb_h3_recv_data(
 {
   (void)conn;
   (void)conn_user_data;
-  auto *stream_state = reinterpret_cast<H3StreamState*>(stream_user_data);
+  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
 
   Errata errata;
   errata.diag(
@@ -686,7 +685,7 @@ cb_h3_recv_header(
   (void)flags;
   (void)conn_user_data;
 
-  auto *stream_state = reinterpret_cast<H3StreamState*>(stream_user_data);
+  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
   stream_state->have_received_headers = true;
 
   TextView name_view = stream_state->register_rcbuf(name);
@@ -734,7 +733,7 @@ cb_h3_end_headers(
   (void)stream_id;
   (void)conn_user_data;
 
-  auto *stream_state = reinterpret_cast<H3StreamState*>(stream_user_data);
+  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
   Errata errata;
   if (!stream_state->have_received_headers) {
     errata.error("Stream did not receive any headers for key: {}", stream_state->key);
@@ -790,7 +789,7 @@ initialize_nghttp3_connection(H3Session *session)
 {
   int rc = 0;
   Errata errata;
-  auto& qs = session->_quic_socket;
+  auto &qs = session->_quic_socket;
   int64_t ctrl_stream_id = 0, qpack_enc_stream_id = 0, qpack_dec_stream_id = 0;
 
   auto const max_streams = ngtcp2_conn_get_max_local_streams_uni(qs.qconn);
@@ -844,7 +843,6 @@ initialize_nghttp3_connection(H3Session *session)
 
   return SUCCEEDED;
 }
-
 
 static void
 quic_settings(QuicSocket &qs, uint64_t stream_buffer_size)
@@ -1010,7 +1008,6 @@ H3Session::record_stream_state(int64_t stream_id, std::shared_ptr<H3StreamState>
   _stream_map[stream_id] = stream_state;
   _last_added_stream = stream_state;
 }
-
 
 void
 H3Session::set_stream_has_ended(int64_t stream_id)
@@ -1189,7 +1186,6 @@ H3StreamState::register_rcbuf(nghttp3_rcbuf *rcbuf)
   return TextView(reinterpret_cast<char *>(buf.base), buf.len);
 }
 
-
 H3StreamState::H3StreamState(bool is_client)
   : will_receive_request{is_client}
   , will_receive_response{!is_client}
@@ -1312,8 +1308,10 @@ H3Session::write(HttpHeader const &hdr)
 
     auto const rc = ngtcp2_conn_open_bidi_stream(_quic_socket.qconn, &stream_id, nullptr);
     if (rc != 0) {
-      zret.error("Failed ngtcp2_conn_open_bidi_stream for key {}, error code: {}",
-          key, Ngtcp2Error{rc});
+      zret.error(
+          "Failed ngtcp2_conn_open_bidi_stream for key {}, error code: {}",
+          key,
+          Ngtcp2Error{rc});
       return zret;
     }
     stream_state->set_stream_id(stream_id);
@@ -1362,12 +1360,8 @@ H3Session::write(HttpHeader const &hdr)
     }
   } else { // Empty body.
     if (hdr._is_response) {
-      submit_result = nghttp3_conn_submit_response(
-          _quic_socket.h3conn,
-          stream_id,
-          nva,
-          num_headers,
-          nullptr);
+      submit_result =
+          nghttp3_conn_submit_response(_quic_socket.h3conn, stream_id, nva, num_headers, nullptr);
     } else {
       submit_result = nghttp3_conn_submit_request(
           _quic_socket.h3conn,

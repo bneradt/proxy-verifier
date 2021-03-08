@@ -48,7 +48,6 @@ BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error 
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 
-
 // TODO: this is copied from curl's ngtcp2.h. That is a c file. Refactor using
 // C++ principles.
 class QuicHandshake
@@ -147,7 +146,6 @@ public:
    * @return A view representation of the given buffer.
    */
   swoc::TextView register_rcbuf(nghttp3_rcbuf *rcbuf);
-
 
 public:
   /// The key identifying this HTTP transaction.

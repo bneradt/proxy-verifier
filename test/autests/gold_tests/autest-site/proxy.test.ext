@@ -28,8 +28,8 @@ def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
     use_protocol_list = [use_http2_to_1, use_http2_to_2, use_http3]
     if use_protocol_list.count(True) > 1:
         raise ValueError(
-                "Cannot specify multiple of use_http2_to_1, "
-                "use_http2_to_2, and use_http3 parameters.")
+            "Cannot specify multiple of use_http2_to_1, "
+            "use_http2_to_2, and use_http3 parameters.")
 
     proxy_rundir = os.path.join(obj.RunDirectory, name)
     process.Setup.MakeDir(proxy_rundir)
