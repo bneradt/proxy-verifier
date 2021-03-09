@@ -1,0 +1,83 @@
+meta:
+  version: '1.0'
+sessions:
+- protocol:
+  - name: http
+    version: 3
+  - name: tls
+    sni: test_sni
+  - name: tcp
+  - name: ip
+
+  transactions:
+
+  #
+  # Do these without a content-length to make sure we handle that correctly.
+  # Content-Length should not be required.
+  #
+  # Also, make sure the user can use pseudo header fields rather than the
+  # method, scheme, url nodes.
+  #
+  - all:
+      headers:
+        fields:
+        - [ uuid, 1 ]
+
+    client-request:
+      headers:
+        encoding: esc_json
+        fields:
+        - [ :method, POST ]
+        - [ :scheme, https ]
+        - [ :authority, example.data.com ]
+        - [ :path, /a/path ]
+        - [ X-Request-Header, request ]
+        - [ X-Deleted-Header, this_will_be_deleted ]
+        - [ X-Proxy-Directive, "Delete=%<x-deleted-header%> Insert=%<X-Added-Header: 1%>" ]
+      content:
+        encoding: plain
+        data: 0123456789
+
+    proxy-request:
+      # HTTP/3 on the server-side.
+      protocol:
+      - name: http
+        version: 3
+      - name: tls
+        sni: test_sni
+      - name: tcp
+      - name: ip
+
+      headers:
+        fields:
+        - [ :method, { value: POST, as: equal } ]
+        - [ :scheme, { value: https, as: equal } ]
+        - [ :authority, { value: example.data.com, as: equal } ]
+        - [ :path, /a/path ]
+        - [ X-Request-Header, { as: present } ]
+        - [ X-Added-Header, { as: present } ]
+        - [ X-Deleted-Header, { as: absent } ]
+        - [ Content-Length, { as: absent } ]
+
+    server-response:
+      headers:
+        encoding: esc_json
+        fields:
+        - [ :status, 500 ]
+        - [ X-Equal-Header, some_content ]
+        - [ X-Response-Header, response ]
+        - [ X-Deleted-Header2, this_will_be_deleted ]
+        - [ X-Proxy-Directive, "Delete=%<x-deleted-header2%> Insert=%<x-added-header: 1%>" ]
+      content:
+        encoding: plain
+        size: 32
+
+    proxy-response:
+      headers:
+        encoding: esc_json
+        fields:
+        - [ :status, { value: 500, as: equal } ]
+        - [ X-Equal-Header, { value: some_content, as: equal } ]
+        - [ X-Response-Header, { as: present } ]
+        - [ X-Deleted-Header2, { as: absent } ]
+        - [ Content-Length, { as: absent } ]
