@@ -143,6 +143,10 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error)
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 
+// TODO: adopt these in and use them.
+static bool ng_process_ingress(int sockfd, QuicSocket &qs);
+static bool ng_flush_egress(int sockfd, QuicSocket &qs);
+
 // --------------------------------------------
 // Begin ngtcp2 callbacks.
 // --------------------------------------------
@@ -928,8 +932,6 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
     return errata;
   }
 
-  // TODO: not sure whether the ngtcp2 connect will clash with this.
-  // Connect to the UDP socket so that send and recv work.
   if (-1 == ::connect(socket_fd, &real_target->sa, real_target->size())) {
     errata.error(R"(Failed to connect socket {}: - {})", *real_target, swoc::bwf::Errno{});
     return errata;
