@@ -77,53 +77,53 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error)
   // enough. The long string will be locally accurate. Clang requires the double
   // braces.
   static const std::unordered_map<int, std::string_view> SHORT_NAME = {
-      {-201, "NGTCP2_ERR_INVALID_ARGUMENT"},
-      {-203, "NGTCP2_ERR_NOBUF"},
-      {-205, "NGTCP2_ERR_PROTO"},
-      {-206, "NGTCP2_ERR_INVALID_STATE"},
-      {-207, "NGTCP2_ERR_ACK_FRAME"},
-      {-208, "NGTCP2_ERR_STREAM_ID_BLOCKED"},
-      {-209, "NGTCP2_ERR_STREAM_IN_USE"},
-      {-210, "NGTCP2_ERR_STREAM_DATA_BLOCKED"},
-      {-211, "NGTCP2_ERR_FLOW_CONTROL"},
-      {-212, "NGTCP2_ERR_CONNECTION_ID_LIMIT"},
-      {-213, "NGTCP2_ERR_STREAM_LIMIT"},
-      {-214, "NGTCP2_ERR_FINAL_SIZE"},
-      {-215, "NGTCP2_ERR_CRYPTO"},
-      {-216, "NGTCP2_ERR_PKT_NUM_EXHAUSTED"},
-      {-217, "NGTCP2_ERR_REQUIRED_TRANSPORT_PARAM"},
-      {-218, "NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM"},
-      {-219, "NGTCP2_ERR_FRAME_ENCODING"},
-      {-220, "NGTCP2_ERR_TLS_DECRYPT"},
-      {-221, "NGTCP2_ERR_STREAM_SHUT_WR"},
-      {-222, "NGTCP2_ERR_STREAM_NOT_FOUND"},
-      {-226, "NGTCP2_ERR_STREAM_STATE"},
-      {-229, "NGTCP2_ERR_RECV_VERSION_NEGOTIATION"},
-      {-230, "NGTCP2_ERR_CLOSING"},
-      {-231, "NGTCP2_ERR_DRAINING"},
-      {-234, "NGTCP2_ERR_TRANSPORT_PARAM"},
-      {-235, "NGTCP2_ERR_DISCARD_PKT"},
-      {-236, "NGTCP2_ERR_PATH_VALIDATION_FAILED"},
-      {-237, "NGTCP2_ERR_CONN_ID_BLOCKED"},
-      {-238, "NGTCP2_ERR_INTERNAL"},
-      {-239, "NGTCP2_ERR_CRYPTO_BUFFER_EXCEEDED"},
-      {-240, "NGTCP2_ERR_WRITE_MORE"},
-      {-241, "NGTCP2_ERR_RETRY"},
-      {-242, "NGTCP2_ERR_DROP_CONN"},
-      {-243, "NGTCP2_ERR_AEAD_LIMIT_REACHED"},
-      {-244, "NGTCP2_ERR_NO_VIABLE_PATH"},
-      {-500, "NGTCP2_ERR_FATAL"},
-      {-501, "NGTCP2_ERR_NOMEM"},
-      {-502, "NGTCP2_ERR_CALLBACK_FAILURE"},
+      {-201, "NGTCP2_ERR_INVALID_ARGUMENT: "},
+      {-203, "NGTCP2_ERR_NOBUF: "},
+      {-205, "NGTCP2_ERR_PROTO: "},
+      {-206, "NGTCP2_ERR_INVALID_STATE: "},
+      {-207, "NGTCP2_ERR_ACK_FRAME: "},
+      {-208, "NGTCP2_ERR_STREAM_ID_BLOCKED: "},
+      {-209, "NGTCP2_ERR_STREAM_IN_USE: "},
+      {-210, "NGTCP2_ERR_STREAM_DATA_BLOCKED: "},
+      {-211, "NGTCP2_ERR_FLOW_CONTROL: "},
+      {-212, "NGTCP2_ERR_CONNECTION_ID_LIMIT: "},
+      {-213, "NGTCP2_ERR_STREAM_LIMIT: "},
+      {-214, "NGTCP2_ERR_FINAL_SIZE: "},
+      {-215, "NGTCP2_ERR_CRYPTO: "},
+      {-216, "NGTCP2_ERR_PKT_NUM_EXHAUSTED: "},
+      {-217, "NGTCP2_ERR_REQUIRED_TRANSPORT_PARAM: "},
+      {-218, "NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM: "},
+      {-219, "NGTCP2_ERR_FRAME_ENCODING: "},
+      {-220, "NGTCP2_ERR_TLS_DECRYPT: "},
+      {-221, "NGTCP2_ERR_STREAM_SHUT_WR: "},
+      {-222, "NGTCP2_ERR_STREAM_NOT_FOUND: "},
+      {-226, "NGTCP2_ERR_STREAM_STATE: "},
+      {-229, "NGTCP2_ERR_RECV_VERSION_NEGOTIATION: "},
+      {-230, "NGTCP2_ERR_CLOSING: "},
+      {-231, "NGTCP2_ERR_DRAINING: "},
+      {-234, "NGTCP2_ERR_TRANSPORT_PARAM: "},
+      {-235, "NGTCP2_ERR_DISCARD_PKT: "},
+      {-236, "NGTCP2_ERR_PATH_VALIDATION_FAILED: "},
+      {-237, "NGTCP2_ERR_CONN_ID_BLOCKED: "},
+      {-238, "NGTCP2_ERR_INTERNAL: "},
+      {-239, "NGTCP2_ERR_CRYPTO_BUFFER_EXCEEDED: "},
+      {-240, "NGTCP2_ERR_WRITE_MORE: "},
+      {-241, "NGTCP2_ERR_RETRY: "},
+      {-242, "NGTCP2_ERR_DROP_CONN: "},
+      {-243, "NGTCP2_ERR_AEAD_LIMIT_REACHED: "},
+      {-244, "NGTCP2_ERR_NO_VIABLE_PATH: "},
+      {-500, "NGTCP2_ERR_FATAL: "},
+      {-501, "NGTCP2_ERR_NOMEM: "},
+      {-502, "NGTCP2_ERR_CALLBACK_FAILURE: "},
   };
 
   auto short_name = [](int n) -> std::string_view {
     if (n > -201 || n < -502) {
-      return "Unknown ngtcp2 error";
+      return "Unknown ngtcp2 error: ";
     }
     auto spot = SHORT_NAME.find(n);
     if (spot == SHORT_NAME.end()) {
-      return "Unknown ngtcp2 error";
+      return "Unknown ngtcp2 error: ";
     }
     return spot->second;
   };
@@ -133,6 +133,10 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error)
     w.print(number_fmt, error._e);
   } else {
     w.write(short_name(error._e));
+    auto const *error_reason = ngtcp2_strerror(error._e);
+    if (error_reason != nullptr) {
+      w.write(error_reason);
+    }
     if (spec._type != 's' && spec._type != 'S') {
       w.write(' ');
       w.print(number_fmt, error._e);
@@ -143,9 +147,28 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error)
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 
-// TODO: adopt these in and use them.
-static bool ng_process_ingress(int sockfd, QuicSocket &qs);
-static bool ng_flush_egress(int sockfd, QuicSocket &qs);
+/** Receive data off of the socket.
+ *
+ * @return True on success, false on failure.
+ */
+static bool ngtcp2_process_ingress(int sockfd, QuicSocket &qs);
+
+/** Send data on the socket.
+ *
+ * @return True on success, false on failure.
+ */
+#if 0
+static bool ngtcp2_flush_egress(int sockfd, QuicSocket &qs);
+#endif
+
+// This satisifies the ngtcp timestamp needs.
+static long
+timestamp()
+{
+  auto const current_time = ClockType::now();
+  auto const duration_since_epoch = current_time.time_since_epoch();
+  return duration_cast<nanoseconds>(duration_since_epoch).count();
+}
 
 // --------------------------------------------
 // Begin ngtcp2 callbacks.
@@ -537,6 +560,188 @@ static ngtcp2_callbacks server_ngtcp2_callbacks = {
 // End ngtcp2 callbacks.
 // --------------------------------------------
 
+static bool
+ngtcp2_process_ingress(int sockfd, QuicSocket &qs)
+{
+  uint8_t buf[65536];
+  size_t bufsize = sizeof(buf);
+  struct sockaddr_storage remote_addr;
+  socklen_t remote_addrlen = sizeof(remote_addr);
+  ngtcp2_path path;
+  ngtcp2_tstamp ts = timestamp();
+  ngtcp2_pkt_info pi = { 0 };
+
+  Errata errata;
+
+  for(;;) {
+    ssize_t recvd = 0;
+    while((recvd = recvfrom(sockfd, (char *)buf, bufsize, 0,
+                            (struct sockaddr *)&remote_addr,
+                            &remote_addrlen)) == -1 &&
+          errno == EINTR)
+      ;
+    if(recvd == -1) {
+      if(errno == EAGAIN || errno == EWOULDBLOCK)
+        break;
+
+      errata.error("ngtcp2_process_ingress: recvfrom() unexpectedly returned {}", recvd);
+      return false;
+    }
+
+    ngtcp2_addr_init(&path.local, (struct sockaddr *)&qs.local_addr,
+                     qs.local_addrlen, NULL);
+    ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr,
+                     remote_addrlen, NULL);
+
+    // Process the packet.
+    int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
+    if(rv != 0) {
+      // TODO Send CONNECTION_CLOSE?
+      errata.error("ngtcp2_process_ingress: ngtcp2_conn_read_pkt() had an error return: {}", Ngtcp2Error{rv});
+      return false;
+    }
+  }
+  return true;
+}
+
+#if 0
+static bool
+ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
+{
+  int rv;
+  ssize_t sent;
+  ssize_t outlen;
+  uint8_t out[NGTCP2_MAX_PKTLEN_IPV4];
+  size_t pktlen;
+  ngtcp2_path_storage ps;
+  ngtcp2_tstamp ts = timestamp();
+  struct sockaddr_storage remote_addr;
+  ngtcp2_tstamp expiry;
+  ngtcp2_duration timeout;
+  int64_t stream_id;
+  ssize_t veccnt;
+  int fin;
+  nghttp3_vec vec[16];
+  ssize_t ndatalen;
+  uint32_t flags;
+
+  Errata errata;
+
+  switch(qs.local_addr.ss_family) {
+  case AF_INET:
+    pktlen = NGTCP2_MAX_PKTLEN_IPV4;
+    break;
+#ifdef ENABLE_IPV6
+  case AF_INET6:
+    pktlen = NGTCP2_MAX_PKTLEN_IPV6;
+    break;
+#endif
+  default:
+    assert(0);
+  }
+
+  rv = ngtcp2_conn_handle_expiry(qs.qconn, ts);
+  if(rv != 0) {
+    errata.error("ngtcp2_conn_handle_expiry returned error: %s",
+          ngtcp2_strerror(rv));
+    return CURLE_SEND_ERROR;
+  }
+
+  ngtcp2_path_storage_zero(&ps);
+
+  for(;;) {
+    veccnt = 0;
+    stream_id = -1;
+    fin = 0;
+
+    if(qs.h3conn && ngtcp2_conn_get_max_data_left(qs.qconn)) {
+      veccnt = nghttp3_conn_writev_stream(qs.h3conn, &stream_id, &fin, vec,
+                                          sizeof(vec) / sizeof(vec[0]));
+      if(veccnt < 0) {
+        failf(data, "nghttp3_conn_writev_stream returned error: %s",
+              nghttp3_strerror((int)veccnt));
+        return CURLE_SEND_ERROR;
+      }
+    }
+
+    flags = NGTCP2_WRITE_STREAM_FLAG_MORE |
+            (fin ? NGTCP2_WRITE_STREAM_FLAG_FIN : 0);
+    outlen = ngtcp2_conn_writev_stream(qs.qconn, &ps.path, NULL, out, pktlen,
+                                       &ndatalen, flags, stream_id,
+                                       (const ngtcp2_vec *)vec, veccnt, ts);
+    if(outlen == 0) {
+      break;
+    }
+    if(outlen < 0) {
+      if(outlen == NGTCP2_ERR_STREAM_DATA_BLOCKED ||
+         outlen == NGTCP2_ERR_STREAM_SHUT_WR) {
+        assert(ndatalen == -1);
+        rv = nghttp3_conn_block_stream(qs.h3conn, stream_id);
+        if(rv != 0) {
+          failf(data, "nghttp3_conn_block_stream returned error: %s\n",
+                nghttp3_strerror(rv));
+          return CURLE_SEND_ERROR;
+        }
+        continue;
+      }
+      else if(outlen == NGTCP2_ERR_WRITE_MORE) {
+        assert(ndatalen >= 0);
+        rv = nghttp3_conn_add_write_offset(qs.h3conn, stream_id, ndatalen);
+        if(rv != 0) {
+          failf(data, "nghttp3_conn_add_write_offset returned error: %s\n",
+                nghttp3_strerror(rv));
+          return CURLE_SEND_ERROR;
+        }
+        continue;
+      }
+      else {
+        assert(ndatalen == -1);
+        failf(data, "ngtcp2_conn_writev_stream returned error: %s",
+              ngtcp2_strerror((int)outlen));
+        return CURLE_SEND_ERROR;
+      }
+    }
+    else if(ndatalen >= 0) {
+      rv = nghttp3_conn_add_write_offset(qs.h3conn, stream_id, ndatalen);
+      if(rv != 0) {
+        failf(data, "nghttp3_conn_add_write_offset returned error: %s\n",
+              nghttp3_strerror(rv));
+        return CURLE_SEND_ERROR;
+      }
+    }
+
+    memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
+    while((sent = send(sockfd, (const char *)out, outlen, 0)) == -1 &&
+          errno == EINTR)
+      ;
+
+    if(sent == -1) {
+      if(errno == EAGAIN || errno == EWOULDBLOCK) {
+        /* TODO Cache packet */
+        break;
+      }
+      else {
+        failf(data, "send() returned %zd (errno %d)", sent,
+              errno);
+        return CURLE_SEND_ERROR;
+      }
+    }
+  }
+
+  expiry = ngtcp2_conn_get_expiry(qs.qconn);
+  if(expiry != UINT64_MAX) {
+    if(expiry <= ts) {
+      timeout = NGTCP2_MILLISECONDS;
+    }
+    else {
+      timeout = expiry - ts;
+    }
+    Curl_expire(data, timeout / NGTCP2_MILLISECONDS, EXPIRE_QUIC);
+  }
+
+  return true;
+}
+#endif
 // --------------------------------------------
 // Begin nghttp3 callbacks.
 // --------------------------------------------
@@ -860,9 +1065,7 @@ quic_settings(QuicSocket &qs, uint64_t stream_buffer_size)
 #else
   s->log_printf = nullptr;
 #endif
-  auto const current_time = ClockType::now();
-  auto const duration_since_epoch = current_time.time_since_epoch();
-  s->initial_ts = duration_cast<nanoseconds>(duration_since_epoch).count();
+  s->initial_ts = timestamp();
   t->initial_max_stream_data_bidi_local = stream_buffer_size;
   t->initial_max_stream_data_bidi_remote = QUIC_MAX_STREAMS;
   t->initial_max_stream_data_uni = QUIC_MAX_STREAMS;
