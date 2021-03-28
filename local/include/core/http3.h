@@ -26,6 +26,7 @@
 #include "swoc/swoc_ip.h"
 #include "swoc/TextView.h"
 
+class H3Session;
 class HttpHeader;
 struct Txn;
 
@@ -42,9 +43,18 @@ struct Ngtcp2Error
   int _e;
   explicit Ngtcp2Error(int e) : _e(e) { }
 };
+
+/** Format wrapper for @c nghttp3 errors.
+ */
+struct Nghttp3Error
+{
+  int _e;
+  explicit Nghttp3Error(int e) : _e(e) { }
+};
 } // namespace bwf
 
 BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error);
+BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Nghttp3Error const &error);
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 
@@ -125,8 +135,10 @@ public:
    * @param[in] is_client Whether this stream state is for a client. That is,
    * is this stream state functioning as a client that will send a request, or
    * a server receiving a request.
+   *
+   * @param[in] session The session which owns this stream state.
    */
-  H3StreamState(bool is_client);
+  H3StreamState(bool is_client, H3Session &session);
   ~H3StreamState();
 
   /// Set the stream_id for this and the appropriate members.
@@ -148,6 +160,9 @@ public:
   swoc::TextView register_rcbuf(nghttp3_rcbuf *rcbuf);
 
 public:
+  /// The session which owns this stream state.
+  H3Session &session;
+
   /// The key identifying this HTTP transaction.
   std::string key;
 

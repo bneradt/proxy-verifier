@@ -38,6 +38,7 @@
 using swoc::Errata;
 using swoc::TextView;
 using swoc::bwf::Ngtcp2Error;
+using swoc::bwf::Nghttp3Error;
 using namespace swoc::literals;
 using namespace std::literals;
 using std::this_thread::sleep_for;
@@ -144,6 +145,73 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Ngtcp2Error const &error)
   }
   return w;
 }
+
+BufferWriter &
+bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Nghttp3Error const &error)
+{
+  // Hand rolled, might not be totally compliant everywhere, but probably close
+  // enough. The long string will be locally accurate. Clang requires the double
+  // braces.
+  static const std::unordered_map<int, std::string_view> SHORT_NAME = {
+      {-101, "NGHTTP3_ERR_INVALID_ARGUMENT: "},
+      {-102, "NGHTTP3_ERR_NOBUF: "},
+      {-103, "NGHTTP3_ERR_INVALID_STATE: "},
+      {-104, "NGHTTP3_ERR_WOULDBLOCK: "},
+      {-105, "NGHTTP3_ERR_STREAM_IN_USE: "},
+      {-106, "NGHTTP3_ERR_PUSH_ID_BLOCKED: "},
+      {-107, "NGHTTP3_ERR_MALFORMED_HTTP_HEADER: "},
+      {-108, "NGHTTP3_ERR_REMOVE_HTTP_HEADER: "},
+      {-109, "NGHTTP3_ERR_MALFORMED_HTTP_MESSAGING: "},
+      {-111, "NGHTTP3_ERR_QPACK_FATAL: "},
+      {-112, "NGHTTP3_ERR_QPACK_HEADER_TOO_LARGE: "},
+      {-113, "NGHTTP3_ERR_IGNORE_STREAM: "},
+      {-114, "NGHTTP3_ERR_STREAM_NOT_FOUND: "},
+      {-115, "NGHTTP3_ERR_IGNORE_PUSH_PROMISE: "},
+      {-116, "NGHTTP3_ERR_CONN_CLOSING: "},
+      {-402, "NGHTTP3_ERR_QPACK_DECOMPRESSION_FAILED: "},
+      {-403, "NGHTTP3_ERR_QPACK_ENCODER_STREAM_ERROR: "},
+      {-404, "NGHTTP3_ERR_QPACK_DECODER_STREAM_ERROR: "},
+      {-408, "NGHTTP3_ERR_H3_FRAME_UNEXPECTED: "},
+      {-409, "NGHTTP3_ERR_H3_FRAME_ERROR: "},
+      {-665, "NGHTTP3_ERR_H3_MISSING_SETTINGS: "},
+      {-667, "NGHTTP3_ERR_H3_INTERNAL_ERROR: "},
+      {-668, "NGHTTP3_ERR_H3_CLOSED_CRITICAL_STREAM: "},
+      {-669, "NGHTTP3_ERR_H3_GENERAL_PROTOCOL_ERROR: "},
+      {-670, "NGHTTP3_ERR_H3_ID_ERROR: "},
+      {-671, "NGHTTP3_ERR_H3_SETTINGS_ERROR: "},
+      {-672, "NGHTTP3_ERR_H3_STREAM_CREATION_ERROR: "},
+      {-900, "NGHTTP3_ERR_FATAL: "},
+      {-901, "NGHTTP3_ERR_NOMEM: "},
+      {-902, "NGHTTP3_ERR_CALLBACK_FAILURE: "},
+  };
+
+  auto short_name = [](int n) -> std::string_view {
+    if (n > -201 || n < -502) {
+      return "Unknown nghttp3 error: ";
+    }
+    auto spot = SHORT_NAME.find(n);
+    if (spot == SHORT_NAME.end()) {
+      return "Unknown nghttp3 error: ";
+    }
+    return spot->second;
+  };
+  static const bwf::Format number_fmt{"[{}]"sv}; // numeric value format.
+  if (spec.has_numeric_type()) {                 // if numeric type, print just the numeric
+                                                 // part.
+    w.print(number_fmt, error._e);
+  } else {
+    w.write(short_name(error._e));
+    auto const *error_reason = nghttp3_strerror(error._e);
+    if (error_reason != nullptr) {
+      w.write(error_reason);
+    }
+    if (spec._type != 's' && spec._type != 'S') {
+      w.write(' ');
+      w.print(number_fmt, error._e);
+    }
+  }
+  return w;
+}
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 
@@ -157,9 +225,7 @@ static bool ngtcp2_process_ingress(int sockfd, QuicSocket &qs);
  *
  * @return True on success, false on failure.
  */
-#if 0
 static bool ngtcp2_flush_egress(int sockfd, QuicSocket &qs);
-#endif
 
 // This satisifies the ngtcp timestamp needs.
 static long
@@ -569,42 +635,45 @@ ngtcp2_process_ingress(int sockfd, QuicSocket &qs)
   socklen_t remote_addrlen = sizeof(remote_addr);
   ngtcp2_path path;
   ngtcp2_tstamp ts = timestamp();
-  ngtcp2_pkt_info pi = { 0 };
+  ngtcp2_pkt_info pi = {0};
 
   Errata errata;
 
-  for(;;) {
+  for (;;) {
     ssize_t recvd = 0;
-    while((recvd = recvfrom(sockfd, (char *)buf, bufsize, 0,
-                            (struct sockaddr *)&remote_addr,
-                            &remote_addrlen)) == -1 &&
-          errno == EINTR)
+    while ((recvd = recvfrom(
+                sockfd,
+                (char *)buf,
+                bufsize,
+                0,
+                (struct sockaddr *)&remote_addr,
+                &remote_addrlen)) == -1 &&
+           errno == EINTR)
       ;
-    if(recvd == -1) {
-      if(errno == EAGAIN || errno == EWOULDBLOCK)
+    if (recvd == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
         break;
 
       errata.error("ngtcp2_process_ingress: recvfrom() unexpectedly returned {}", recvd);
       return false;
     }
 
-    ngtcp2_addr_init(&path.local, (struct sockaddr *)&qs.local_addr,
-                     qs.local_addrlen, NULL);
-    ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr,
-                     remote_addrlen, NULL);
+    ngtcp2_addr_init(&path.local, (struct sockaddr *)&qs.local_addr, qs.local_addrlen, NULL);
+    ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, NULL);
 
     // Process the packet.
     int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
-    if(rv != 0) {
+    if (rv != 0) {
       // TODO Send CONNECTION_CLOSE?
-      errata.error("ngtcp2_process_ingress: ngtcp2_conn_read_pkt() had an error return: {}", Ngtcp2Error{rv});
+      errata.error(
+          "ngtcp2_process_ingress: ngtcp2_conn_read_pkt() had an error return: {}",
+          Ngtcp2Error{rv});
       return false;
     }
   }
   return true;
 }
 
-#if 0
 static bool
 ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
 {
@@ -616,8 +685,6 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
   ngtcp2_path_storage ps;
   ngtcp2_tstamp ts = timestamp();
   struct sockaddr_storage remote_addr;
-  ngtcp2_tstamp expiry;
-  ngtcp2_duration timeout;
   int64_t stream_id;
   ssize_t veccnt;
   int fin;
@@ -627,7 +694,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
 
   Errata errata;
 
-  switch(qs.local_addr.ss_family) {
+  switch (qs.local_addr.ss_family) {
   case AF_INET:
     pktlen = NGTCP2_MAX_PKTLEN_IPV4;
     break;
@@ -641,94 +708,96 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
   }
 
   rv = ngtcp2_conn_handle_expiry(qs.qconn, ts);
-  if(rv != 0) {
-    errata.error("ngtcp2_conn_handle_expiry returned error: %s",
-          ngtcp2_strerror(rv));
-    return CURLE_SEND_ERROR;
+  if (rv != 0) {
+    errata.error("ngtcp2_conn_handle_expiry returned error: {}", Ngtcp2Error{rv});
+    return false;
   }
 
   ngtcp2_path_storage_zero(&ps);
 
-  for(;;) {
+  for (;;) {
     veccnt = 0;
     stream_id = -1;
     fin = 0;
 
-    if(qs.h3conn && ngtcp2_conn_get_max_data_left(qs.qconn)) {
-      veccnt = nghttp3_conn_writev_stream(qs.h3conn, &stream_id, &fin, vec,
-                                          sizeof(vec) / sizeof(vec[0]));
-      if(veccnt < 0) {
-        failf(data, "nghttp3_conn_writev_stream returned error: %s",
-              nghttp3_strerror((int)veccnt));
-        return CURLE_SEND_ERROR;
+    if (qs.h3conn && ngtcp2_conn_get_max_data_left(qs.qconn)) {
+      veccnt = nghttp3_conn_writev_stream(
+          qs.h3conn,
+          &stream_id,
+          &fin,
+          vec,
+          sizeof(vec) / sizeof(vec[0]));
+      if (veccnt < 0) {
+        errata.error("nghttp3_conn_writev_stream returned error: {}", Nghttp3Error{(int)veccnt});
+        return false;
       }
     }
 
-    flags = NGTCP2_WRITE_STREAM_FLAG_MORE |
-            (fin ? NGTCP2_WRITE_STREAM_FLAG_FIN : 0);
-    outlen = ngtcp2_conn_writev_stream(qs.qconn, &ps.path, NULL, out, pktlen,
-                                       &ndatalen, flags, stream_id,
-                                       (const ngtcp2_vec *)vec, veccnt, ts);
-    if(outlen == 0) {
+    flags = NGTCP2_WRITE_STREAM_FLAG_MORE | (fin ? NGTCP2_WRITE_STREAM_FLAG_FIN : 0);
+    outlen = ngtcp2_conn_writev_stream(
+        qs.qconn,
+        &ps.path,
+        NULL,
+        out,
+        pktlen,
+        &ndatalen,
+        flags,
+        stream_id,
+        (const ngtcp2_vec *)vec,
+        veccnt,
+        ts);
+    if (outlen == 0) {
       break;
     }
-    if(outlen < 0) {
-      if(outlen == NGTCP2_ERR_STREAM_DATA_BLOCKED ||
-         outlen == NGTCP2_ERR_STREAM_SHUT_WR) {
+    if (outlen < 0) {
+      if (outlen == NGTCP2_ERR_STREAM_DATA_BLOCKED || outlen == NGTCP2_ERR_STREAM_SHUT_WR) {
         assert(ndatalen == -1);
         rv = nghttp3_conn_block_stream(qs.h3conn, stream_id);
-        if(rv != 0) {
-          failf(data, "nghttp3_conn_block_stream returned error: %s\n",
-                nghttp3_strerror(rv));
-          return CURLE_SEND_ERROR;
+        if (rv != 0) {
+          errata.error("nghttp3_conn_block_stream returned error: {}", Nghttp3Error{rv});
+          return false;
         }
         continue;
-      }
-      else if(outlen == NGTCP2_ERR_WRITE_MORE) {
+      } else if (outlen == NGTCP2_ERR_WRITE_MORE) {
         assert(ndatalen >= 0);
         rv = nghttp3_conn_add_write_offset(qs.h3conn, stream_id, ndatalen);
-        if(rv != 0) {
-          failf(data, "nghttp3_conn_add_write_offset returned error: %s\n",
-                nghttp3_strerror(rv));
-          return CURLE_SEND_ERROR;
+        if (rv != 0) {
+          errata.error("nghttp3_conn_add_write_offset returned error: {}", Nghttp3Error{rv});
+          return false;
         }
         continue;
-      }
-      else {
+      } else {
         assert(ndatalen == -1);
-        failf(data, "ngtcp2_conn_writev_stream returned error: %s",
-              ngtcp2_strerror((int)outlen));
-        return CURLE_SEND_ERROR;
+        errata.error("ngtcp2_conn_writev_stream returned error: {}", Ngtcp2Error{(int)outlen});
+        return false;
       }
-    }
-    else if(ndatalen >= 0) {
+    } else if (ndatalen >= 0) {
       rv = nghttp3_conn_add_write_offset(qs.h3conn, stream_id, ndatalen);
-      if(rv != 0) {
-        failf(data, "nghttp3_conn_add_write_offset returned error: %s\n",
-              nghttp3_strerror(rv));
-        return CURLE_SEND_ERROR;
+      if (rv != 0) {
+        errata.error("nghttp3_conn_add_write_offset returned error: {}", Nghttp3Error{rv});
+        return false;
       }
     }
 
     memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
-    while((sent = send(sockfd, (const char *)out, outlen, 0)) == -1 &&
-          errno == EINTR)
+    while ((sent = send(sockfd, (const char *)out, outlen, 0)) == -1 && errno == EINTR)
       ;
 
-    if(sent == -1) {
-      if(errno == EAGAIN || errno == EWOULDBLOCK) {
+    if (sent == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
         /* TODO Cache packet */
         break;
-      }
-      else {
-        failf(data, "send() returned %zd (errno %d)", sent,
-              errno);
-        return CURLE_SEND_ERROR;
+      } else {
+        errata.error("send() returned {}: {}", sent, swoc::bwf::Errno{});
+        return false;
       }
     }
   }
 
-  expiry = ngtcp2_conn_get_expiry(qs.qconn);
+#if 0
+  // TODO Implement this via polling on the socket.
+  ngtcp2_duration timeout = 0;
+  ngtcp2_tstamp expiry = ngtcp2_conn_get_expiry(qs.qconn);
   if(expiry != UINT64_MAX) {
     if(expiry <= ts) {
       timeout = NGTCP2_MILLISECONDS;
@@ -738,10 +807,79 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
     }
     Curl_expire(data, timeout / NGTCP2_MILLISECONDS, EXPIRE_QUIC);
   }
+#endif
 
   return true;
 }
+
+// TODO:
+// In curl, this is called via Curl_read.
+/* incoming data frames on the h3 stream */
+static bool
+nghttp3_stream_recv(H3StreamState &stream)
+{
+  int sockfd = stream.session.get_fd();
+  QuicSocket &qs = stream.session._quic_socket;
+
+  if (ngtcp2_process_ingress(sockfd, qs)) {
+    return false;
+  }
+  if (ngtcp2_flush_egress(sockfd, qs)) {
+    return false;
+  }
+  return true;
+}
+
+#if 0
+// TODO
+// This function should not be needed because it is replaced by
+// H3Session::write(HttpHeader). Just keeping it here in case I get confused
+// later about this so I can see this note. Remove it after HTTP/3 development
+// is done.
+static bool ngh3_stream_send(
+    H3StreamState &stream
+    const void *mem,
+    size_t len)
+{
+  ssize_t sent;
+  struct connectdata *conn = data->conn;
+  struct quicsocket *qs = conn->quic;
+  curl_socket_t sockfd = conn->sock[sockindex];
+  struct HTTP *stream = data->req.p.http;
+
+  if(!stream->h3req) {
+    CURLcode result = http_request(data, mem, len);
+    if(result) {
+      *curlcode = CURLE_SEND_ERROR;
+      return -1;
+    }
+    sent = len;
+  }
+  else {
+    H3BUGF(infof(data, "ngh3_stream_send() wants to send %zd bytes\n",
+                 len));
+    if(!stream->upload_len) {
+      stream->upload_mem = mem;
+      stream->upload_len = len;
+      (void)nghttp3_conn_resume_stream(qs->h3conn, stream->stream3_id);
+      sent = len;
+    }
+    else {
+      *curlcode = CURLE_AGAIN;
+      return -1;
+    }
+  }
+
+  if(ngtcp2_flush_egress(sockfd, qs)) {
+    *curlcode = CURLE_SEND_ERROR;
+    return -1;
+  }
+
+  *curlcode = CURLE_OK;
+  return sent;
+}
 #endif
+
 // --------------------------------------------
 // Begin nghttp3 callbacks.
 // --------------------------------------------
@@ -820,16 +958,19 @@ cb_h3_stream_close(
   Errata errata;
 
   auto *session = reinterpret_cast<H3Session *>(conn_user_data);
-  // TODO: Make sure the stream really can be erased here. Is it's lifetime
-  // managed by another holder of the H3StreamState pointer? (If needed.)
+  auto stream_map_iter = session->_stream_map.find(stream_id);
+  if (stream_map_iter == session->_stream_map.end()) {
+    errata.error("Stream state for stream id {} not available during session close.", stream_id);
+  }
+  // Take an owning shared_ptr reference for the nghttp3_stream_recv call below.
+  auto stream_state = stream_map_iter->second;
   session->_stream_map.erase(stream_id);
 
   errata.diag("HTTP/3 Stream is closed with id: {}", stream_id);
 
   /* make sure that ngh3_stream_recv is called again to complete the transfer
-     even if there are no more packets to be received from the server. */
-  // TODO: this looks important. Probably have to do a receive here?
-  // data->state.drain = 1;
+   * even if there are no more packets to be received from the server. */
+  nghttp3_stream_recv(*stream_state);
   return 0;
 }
 
@@ -1391,8 +1532,9 @@ H3StreamState::register_rcbuf(nghttp3_rcbuf *rcbuf)
   return TextView(reinterpret_cast<char *>(buf.base), buf.len);
 }
 
-H3StreamState::H3StreamState(bool is_client)
-  : will_receive_request{is_client}
+H3StreamState::H3StreamState(bool is_client, H3Session &h3_session)
+  : session{h3_session}
+  , will_receive_request{is_client}
   , will_receive_response{!is_client}
   , stream_start{ClockType::now()}
   , request_from_client{std::make_shared<HttpHeader>()}
@@ -1508,7 +1650,7 @@ H3Session::write(HttpHeader const &hdr)
   } else {
     // Only servers write responses while clients write requests.
     bool const is_client = hdr._is_request;
-    new_stream_state = std::make_shared<H3StreamState>(is_client);
+    new_stream_state = std::make_shared<H3StreamState>(is_client, *this);
     stream_state = new_stream_state.get();
 
     auto const rc = ngtcp2_conn_open_bidi_stream(_quic_socket.qconn, &stream_id, nullptr);
@@ -1520,6 +1662,7 @@ H3Session::write(HttpHeader const &hdr)
       return zret;
     }
     stream_state->set_stream_id(stream_id);
+    record_stream_state(stream_id, new_stream_state);
   }
   stream_state->key = key;
 
@@ -1593,6 +1736,10 @@ H3Session::write(HttpHeader const &hdr)
     } else {
       zret.diag("Sent the following HTTP/2 headers for stream id {}:\n{}", stream_id, hdr);
     }
+  }
+
+  if (ngtcp2_flush_egress(get_fd(), _quic_socket)) {
+    zret.error("Failure calling ngtcp2_flush_egress while writing headers.");
   }
   // TODO: free'ing here is what curl does, but don't we have to read on the
   // socket and send on the socket?
