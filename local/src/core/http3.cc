@@ -814,12 +814,12 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
 
 // TODO:
 // In curl, this is called via Curl_read.
-/* incoming data frames on the h3 stream */
+// In curl, this is ngh3_stream_recv and is called via Curl_read.
 static bool
-nghttp3_stream_recv(H3StreamState &stream)
+nghttp3_data_recv(H3Session &session)
 {
-  int sockfd = stream.session.get_fd();
-  QuicSocket &qs = stream.session._quic_socket;
+  int sockfd = session.get_fd();
+  QuicSocket &qs = session._quic_socket;
 
   if (ngtcp2_process_ingress(sockfd, qs)) {
     return false;
@@ -958,19 +958,13 @@ cb_h3_stream_close(
   Errata errata;
 
   auto *session = reinterpret_cast<H3Session *>(conn_user_data);
-  auto stream_map_iter = session->_stream_map.find(stream_id);
-  if (stream_map_iter == session->_stream_map.end()) {
-    errata.error("Stream state for stream id {} not available during session close.", stream_id);
-  }
-  // Take an owning shared_ptr reference for the nghttp3_stream_recv call below.
-  auto stream_state = stream_map_iter->second;
   session->_stream_map.erase(stream_id);
 
   errata.diag("HTTP/3 Stream is closed with id: {}", stream_id);
 
   /* make sure that ngh3_stream_recv is called again to complete the transfer
    * even if there are no more packets to be received from the server. */
-  nghttp3_stream_recv(*stream_state);
+  nghttp3_data_recv(*session);
   return 0;
 }
 
@@ -1324,13 +1318,10 @@ H3Session::poll_for_headers(chrono::milliseconds timeout)
     close();
     return -1;
   }
-  // TODO: replace with the nghttp3 call.
-  auto const received_bytes = 0;
-  // auto const received_bytes =
-  // receive_nghttp2_request(this->get_session(), nullptr, 0, 0, this, timeout);
-  if (received_bytes == 0) {
-    // The receive timed out.
-    return 0;
+  if (!nghttp3_data_recv(*this)) {
+    zret.error("Calling nghttp3_stream_recv in H3Session::poll_for_headers failed.");
+    close();
+    return zret;
   }
   if (is_closed()) {
     return -1;
@@ -1532,9 +1523,8 @@ H3StreamState::register_rcbuf(nghttp3_rcbuf *rcbuf)
   return TextView(reinterpret_cast<char *>(buf.base), buf.len);
 }
 
-H3StreamState::H3StreamState(bool is_client, H3Session &h3_session)
-  : session{h3_session}
-  , will_receive_request{is_client}
+H3StreamState::H3StreamState(bool is_client)
+  : will_receive_request{is_client}
   , will_receive_response{!is_client}
   , stream_start{ClockType::now()}
   , request_from_client{std::make_shared<HttpHeader>()}
@@ -1650,7 +1640,7 @@ H3Session::write(HttpHeader const &hdr)
   } else {
     // Only servers write responses while clients write requests.
     bool const is_client = hdr._is_request;
-    new_stream_state = std::make_shared<H3StreamState>(is_client, *this);
+    new_stream_state = std::make_shared<H3StreamState>(is_client);
     stream_state = new_stream_state.get();
 
     auto const rc = ngtcp2_conn_open_bidi_stream(_quic_socket.qconn, &stream_id, nullptr);

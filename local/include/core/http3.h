@@ -26,7 +26,6 @@
 #include "swoc/swoc_ip.h"
 #include "swoc/TextView.h"
 
-class H3Session;
 class HttpHeader;
 struct Txn;
 
@@ -135,10 +134,8 @@ public:
    * @param[in] is_client Whether this stream state is for a client. That is,
    * is this stream state functioning as a client that will send a request, or
    * a server receiving a request.
-   *
-   * @param[in] session The session which owns this stream state.
    */
-  H3StreamState(bool is_client, H3Session &session);
+  H3StreamState(bool is_client);
   ~H3StreamState();
 
   /// Set the stream_id for this and the appropriate members.
@@ -160,9 +157,6 @@ public:
   swoc::TextView register_rcbuf(nghttp3_rcbuf *rcbuf);
 
 public:
-  /// The session which owns this stream state.
-  H3Session &session;
-
   /// The key identifying this HTTP transaction.
   std::string key;
 
