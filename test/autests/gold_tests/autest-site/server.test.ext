@@ -114,9 +114,9 @@ def _configure_server(obj, process, name, replay_dir, find_ports=True, use_ipv6=
         command += "{} ".format(other_args)
     process.Command = command
 
-    if http3_ports:
-        process.Ready = When.PortOpen(http3_ports[0])
-    elif https_ports:
+    # Do not try to run PortOpen on the HTTP/3 (QUIC) socket because UDP is a
+    # connectionless protocol.
+    if https_ports:
         process.Ready = When.PortOpen(https_ports[0])
     elif http_ports:
         process.Ready = When.PortOpen(http_ports[0])
@@ -241,7 +241,7 @@ def AddServerProcess(run, name, replay_dir, find_ports=True, use_ipv6=False,
 
     # TODO: will have to add this back later. For some reason this crashes in
     # AuTest, and only when AuTest runs. The reply file works fine.
-    #client.StartBefore(server)
+    client.StartBefore(server)
 
     return server
 
