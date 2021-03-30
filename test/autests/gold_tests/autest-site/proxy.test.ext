@@ -76,12 +76,18 @@ def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
         command += " --http2_to_2"
 
     if use_http3:
-        command += " --http3"
+        listening_http3_sentinel = 'quic_socket_is_ready'
+        command += f" --http3 --listening-http3-sentinel {listening_http3_sentinel}"
 
     process.Setup.Copy(proxy_src, proxy_dest, CopyLogic.SoftFiles)
     process.Command = command
 
-    process.Ready = When.PortOpen(listen_port)
+    if use_http3:
+        # UDP sockets are connectionless, so PortOpen will not work.
+        process.Ready = When.FileExists(listening_http3_sentinel)
+    else:
+        process.Ready = When.PortOpen(listen_port)
+
     process.ReturnCode = 0
 
 

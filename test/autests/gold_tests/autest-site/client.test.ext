@@ -14,7 +14,8 @@ from ports import get_port
 
 
 def _configure_client(obj, process, name, replay_dir, find_ports=True, use_ipv6=False,
-                      configure_http=True, configure_https=True, http_ports=None, https_ports=None,
+                      configure_http=True, configure_https=True, configure_http3=True,
+                      http_ports=None, https_ports=None, http3_ports=None,
                       ssl_cert='', ca_certs='', verbose=True, other_args=''):
     """
     Configure the process for running the verifier-client.
@@ -62,6 +63,15 @@ def _configure_client(obj, process, name, replay_dir, find_ports=True, use_ipv6=
         command += create_address_argument(https_ports, use_ipv6)
         command += " "
 
+    if configure_http3 and find_ports and not http3_ports:
+        http3_ports = [get_port(process, "http3_port")]
+
+    if http3_ports:
+        command += "--connect-http3 "
+        command += create_address_argument(http3_ports, use_ipv6)
+        command += " "
+
+    if https_ports or http3_ports:
         if ssl_cert == '':
             # Search for the root-level cert.
             test_root = process.TestRoot
@@ -107,7 +117,8 @@ def _configure_client(obj, process, name, replay_dir, find_ports=True, use_ipv6=
 
 
 def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
-                      configure_http=True, configure_https=True, http_ports=None, https_ports=None,
+                      configure_http=True, configure_https=True, configure_http3=True,
+                      http_ports=None, https_ports=None, http3_ports=None,
                       ssl_cert='', ca_certs='', verbose=True, other_args=''):
     """
     Create a verifier-client process.
@@ -132,9 +143,13 @@ def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
 
         configure_https: (bool) True if https ports should be configured, False if not.
 
+        configure_http3: (bool) True if http3 ports should be configured, False if not.
+
         http_ports: (list of ints) The set of HTTP ports to connect on.
 
         https_ports: (list of ints) The set of HTTPS ports to connect on.
+
+        http3_ports: (list of ints) The set of HTTP/3 ports to connect on.
 
         ssl_cert: (path) The location of the cert for HTTPS encryption. If this
             is not provided and https_ports is non-empty, the root-level
@@ -169,8 +184,10 @@ def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
         use_ipv6,
         configure_http,
         configure_https,
+        configure_http3,
         http_ports,
         https_ports,
+        http3_ports,
         ssl_cert,
         ca_certs,
         verbose,
@@ -179,7 +196,8 @@ def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
 
 
 def AddClientProcess(run, name, replay_dir, find_ports=True, use_ipv6=False,
-                     configure_http=True, configure_https=True, http_ports=None, https_ports=None,
+                     configure_http=True, configure_https=True, configure_http3=True,
+                     http_ports=None, https_ports=None, http3_ports=None,
                      ssl_cert='', ca_certs='', verbose=True, other_args=''):
     """
     Set the Default process of the test run to a verifier-client Process.
@@ -204,8 +222,10 @@ def AddClientProcess(run, name, replay_dir, find_ports=True, use_ipv6=False,
         use_ipv6,
         configure_http,
         configure_https,
+        configure_http3,
         http_ports,
         https_ports,
+        http3_ports,
         ssl_cert,
         ca_certs,
         verbose,

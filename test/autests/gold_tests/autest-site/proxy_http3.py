@@ -11,6 +11,7 @@ import asyncio
 import importlib
 import logging
 import os
+from pathlib import Path
 import time
 from collections import deque
 from email.utils import formatdate
@@ -234,7 +235,7 @@ class SessionTicketStore:
         return self.tickets.pop(label, None)
 
 
-def configure_http3_server(listen_port, server_port, https_pem, ca_pem):
+def configure_http3_server(listen_port, server_port, https_pem, ca_pem, listening_sentinel):
 
     HttpQuicServerHandler.cert_file = https_pem
     HttpQuicServerHandler.ca_file = ca_pem
@@ -271,6 +272,10 @@ def configure_http3_server(listen_port, server_port, https_pem, ca_pem):
             session_ticket_handler=ticket_store.add
         )
     )
+
+    # Indicate to the caller that the quic socket is configured and listening.
+    Path(listening_sentinel).touch()
+
     try:
         loop.run_forever()
     except KeyboardInterrupt as e:
@@ -279,10 +284,3 @@ def configure_http3_server(listen_port, server_port, https_pem, ca_pem):
         raise e
     except SystemExit:
         pass
-
-
-configure_http3_server(
-    4443,
-    4444,
-    '/Users/bneradt/project_not_synced/src/proxy-verifier/test/keys/server.pem',
-    '/Users/bneradt/project_not_synced/src/proxy-verifier/test/keys/server.pem')

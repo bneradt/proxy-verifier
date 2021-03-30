@@ -29,6 +29,8 @@ def parse_args():
                         'proxy https connection from the client')
     parser.add_argument('--ca-pem', metavar='ca_pem', type=str, default=None,
                         help='The certificate authority file for verifying peers')
+    parser.add_argument('--listening-http3-sentinel', type=str, default=None,
+                        help='A sentinel file to touch when the HTTP/3 socket is listening.')
 
     proto_group = parser.add_mutually_exclusive_group()
     proto_group.add_argument('--http2_to_1', action="store_true",
@@ -66,11 +68,14 @@ def main():
                 args.ca_pem,
                 h2_to_server=True)
         elif args.http3:
+            # TODO: why is the ca and the server cert both https.pem? That
+            # seems to be the needed thing to do.
             proxy_http3.configure_http3_server(
                 args.listen_port,
                 args.server_port,
                 args.https_pem,
-                args.ca_pem)
+                args.https_pem,
+                args.listening_http3_sentinel)
         else:
             proxy_http1.configure_http1_server(
                 proxy_http1.ProxyRequestHandler, proxy_http1.ThreadingHTTPServer,
