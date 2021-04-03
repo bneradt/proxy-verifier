@@ -651,8 +651,10 @@ ngtcp2_process_ingress(int sockfd, QuicSocket &qs)
            errno == EINTR)
       ;
     if (recvd == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK)
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        std::cout << "EAGAIN on recvfrom." << std::endl;
         break;
+      }
 
       errata.error("ngtcp2_process_ingress: recvfrom() unexpectedly returned {}", recvd);
       return false;
@@ -721,6 +723,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
     fin = 0;
 
     if (qs.h3conn && ngtcp2_conn_get_max_data_left(qs.qconn)) {
+      std::cout << "calling nghttp3_conn_writev_stream" << std::endl;
       veccnt = nghttp3_conn_writev_stream(
           qs.h3conn,
           &stream_id,
@@ -746,6 +749,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
         (const ngtcp2_vec *)vec,
         veccnt,
         ts);
+    std::cout << "ngtcp2_conn_writev_stream outlen: " << std::to_string(outlen) << std::endl;
     if (outlen == 0) {
       break;
     }
@@ -780,12 +784,14 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
     }
 
     memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
+    std::cout << "Sending data of length: " << std::to_string(outlen) << std::endl;
     while ((sent = send(sockfd, (const char *)out, outlen, 0)) == -1 && errno == EINTR)
       ;
 
     if (sent == -1) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         /* TODO Cache packet */
+        std::cout << "Got EAGAIN on send" << std::endl;
         break;
       } else {
         errata.error("send() returned {}: {}", sent, swoc::bwf::Errno{});
@@ -821,10 +827,10 @@ nghttp3_data_recv(H3Session &session)
   int sockfd = session.get_fd();
   QuicSocket &qs = session._quic_socket;
 
-  if (ngtcp2_process_ingress(sockfd, qs)) {
+  if (!ngtcp2_process_ingress(sockfd, qs)) {
     return false;
   }
-  if (ngtcp2_flush_egress(sockfd, qs)) {
+  if (!ngtcp2_flush_egress(sockfd, qs)) {
     return false;
   }
   return true;
@@ -1288,6 +1294,7 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
 Errata
 H3Session::do_connect(swoc::IPEndpoint const *real_target)
 {
+  std::cout << "Establishing a UDP socket." << std::endl;
   Errata errata = connect_udp_socket(real_target);
   if (!errata.is_ok()) {
     return errata;
@@ -1432,6 +1439,7 @@ H3Session::connect()
   // In curl, see: lib/vquic/ngtcp2.c:Curl_quic_connect()
   //
 
+  std::cout << "UDP socket configured: now doing quic part." << std::endl;
   errata.note(this->client_session_init());
   if (!errata.is_ok()) {
     errata.error("TLS initialization failed.");
@@ -1776,52 +1784,79 @@ H3Session::server_init(SSL_CTX *& /* server_context */)
   return errata;
 }
 
-Errata
-H3Session::client_session_init()
+static SSL_CTX *
+quic_ssl_ctx()
 {
   Errata errata;
-  _quic_socket.version = NGTCP2_PROTO_VER_MAX;
-
   SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_method());
-  _quic_socket.sslctx = ssl_ctx;
-  SSL *ssl = SSL_new(ssl_ctx);
-  _quic_socket.ssl = ssl;
-
-  SSL_set_app_data(ssl, this);
-  SSL_set_connect_state(ssl);
-
-  auto const *alpn = (const uint8_t *)NGHTTP3_ALPN_H3;
-  auto const alpnlen = sizeof(NGHTTP3_ALPN_H3) - 1;
-  SSL_set_alpn_protos(ssl, alpn, (int)alpnlen);
-
-  SSL_set_tlsext_host_name(ssl, _client_sni.c_str());
-
-  if (_client_verify_mode != SSL_VERIFY_NONE) {
-    errata.diag(
-        R"(Setting client H3 verification mode against the proxy to: {}.)",
-        _client_verify_mode);
-    SSL_set_verify(ssl, _client_verify_mode, nullptr /* No verify_callback is passed */);
-  }
 
   SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_3_VERSION);
   SSL_CTX_set_max_proto_version(ssl_ctx, TLS1_3_VERSION);
 
   SSL_CTX_set_default_verify_paths(ssl_ctx);
 
-  if (SSL_CTX_set_ciphersuites(ssl_ctx, QUIC_CIPHERS) != 1) {
+  if(SSL_CTX_set_ciphersuites(ssl_ctx, QUIC_CIPHERS) != 1) {
     errata.error("SSL_CTX_set_ciphersuites failed: {}", swoc::bwf::SSLError{});
-    return errata;
+    return nullptr;
   }
 
-  if (SSL_CTX_set1_groups_list(ssl_ctx, QUIC_GROUPS) != 1) {
+  if(SSL_CTX_set1_groups_list(ssl_ctx, QUIC_GROUPS) != 1) {
     errata.error("SSL_CTX_set1_groups_list failed: {}", swoc::bwf::SSLError{});
-    return errata;
+    return nullptr;
   }
 
   SSL_CTX_set_quic_method(ssl_ctx, &ssl_quic_method);
 
   // TODO: consider keylog callbacks.
-  // SSL_CTX_set_keylog_callback(ssl_ctx, keylog_callback);
+#if 0
+  /* Open the file if a TLS or QUIC backend has not done this before. */
+  Curl_tls_keylog_open();
+  if(Curl_tls_keylog_enabled()) {
+    SSL_CTX_set_keylog_callback(ssl_ctx, keylog_callback);
+  }
+#endif
+
+  return ssl_ctx;
+}
+
+static int
+quic_init_ssl(QuicSocket &qs, std::string const &hostname)
+{
+  const uint8_t *alpn = NULL;
+  size_t alpnlen = 0;
+
+  assert(qs.ssl);
+  qs.ssl = SSL_new(qs.sslctx);
+
+  SSL_set_app_data(qs.ssl, &qs);
+  SSL_set_connect_state(qs.ssl);
+
+  alpn = (const uint8_t *)NGHTTP3_ALPN_H3;
+  alpnlen = sizeof(NGHTTP3_ALPN_H3) - 1;
+  if(alpn) {
+    SSL_set_alpn_protos(qs.ssl, alpn, (int)alpnlen);
+  }
+
+  /* set SNI */
+  SSL_set_tlsext_host_name(qs.ssl, hostname.c_str());
+  return 0;
+}
+
+Errata
+H3Session::client_session_init()
+{
+  Errata errata;
+  _quic_socket.version = NGTCP2_PROTO_VER_MAX;
+
+  _quic_socket.sslctx = quic_ssl_ctx();
+  quic_init_ssl(_quic_socket, _client_sni);
+
+  if (_client_verify_mode != SSL_VERIFY_NONE) {
+    errata.diag(
+        R"(Setting client H3 verification mode against the proxy to: {}.)",
+        _client_verify_mode);
+    SSL_set_verify(_quic_socket.ssl, _client_verify_mode, nullptr /* No verify_callback is passed */);
+  }
 
   _quic_socket.dcid.datalen = NGTCP2_MAX_CIDLEN;
   QuicSocket::randomly_populate_array(_quic_socket.dcid.data, _quic_socket.dcid.datalen);
@@ -1857,6 +1892,7 @@ H3Session::client_session_init()
       nullptr);
   ngtcp2_addr_init(&path.remote, &this->_endpoint->sa, this->_endpoint->size(), nullptr);
 
+  std::cout << "Calling ngtcp2_conn_client_new" << std::endl;
   auto const rc = ngtcp2_conn_client_new(
       &_quic_socket.qconn,
       &_quic_socket.dcid,
@@ -1869,13 +1905,33 @@ H3Session::client_session_init()
       nullptr,
       this /* The user_data in the ngtcp2 callbacks. */);
   if (rc != 0) {
+    std::cout << "ngtcp2_conn_client_new FAILED" << std::endl;
     errata.error("ngtcp2_conn_client_new failed.");
     return errata;
   }
 
   ngtcp2_conn_set_tls_native_handle(_quic_socket.qconn, _quic_socket.ssl);
 
-  // TODO Set up the HTTP/3 callback methods
+  std::cout << "Connection: receiving and sending data" << std::endl;
+  nghttp3_data_recv(*this);
+
+  int sleep_counter = 0;
+  bool handshake_completed = ngtcp2_conn_get_handshake_completed(_quic_socket.qconn);
+  while (!handshake_completed) {
+    // Replace this with the polling mechanism.
+    if (sleep_counter++ == 1000) {
+      std::cout << "Timed out waiting for nghttp3_data_recv to finish the connection." << std::endl;
+      break;
+    }
+    sleep_for(1ms);
+    nghttp3_data_recv(*this);
+    handshake_completed = ngtcp2_conn_get_handshake_completed(_quic_socket.qconn);
+  }
+  if (handshake_completed) {
+    std::cout << "Handshake completed." << std::endl;
+  } else {
+    std::cout << "Handshake failed." << std::endl;
+  }
   return errata;
 }
 
