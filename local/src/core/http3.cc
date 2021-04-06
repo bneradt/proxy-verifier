@@ -652,7 +652,6 @@ ngtcp2_process_ingress(int sockfd, QuicSocket &qs)
       ;
     if (recvd == -1) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        std::cout << "EAGAIN on recvfrom." << std::endl;
         break;
       }
 
@@ -723,7 +722,6 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
     fin = 0;
 
     if (qs.h3conn && ngtcp2_conn_get_max_data_left(qs.qconn)) {
-      std::cout << "calling nghttp3_conn_writev_stream" << std::endl;
       veccnt = nghttp3_conn_writev_stream(
           qs.h3conn,
           &stream_id,
@@ -749,7 +747,6 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
         (const ngtcp2_vec *)vec,
         veccnt,
         ts);
-    std::cout << "ngtcp2_conn_writev_stream outlen: " << std::to_string(outlen) << std::endl;
     if (outlen == 0) {
       break;
     }
@@ -784,14 +781,12 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
     }
 
     memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
-    std::cout << "Sending data of length: " << std::to_string(outlen) << std::endl;
     while ((sent = send(sockfd, (const char *)out, outlen, 0)) == -1 && errno == EINTR)
       ;
 
     if (sent == -1) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         /* TODO Cache packet */
-        std::cout << "Got EAGAIN on send" << std::endl;
         break;
       } else {
         errata.error("send() returned {}: {}", sent, swoc::bwf::Errno{});
@@ -1293,7 +1288,6 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
 Errata
 H3Session::do_connect(swoc::IPEndpoint const *real_target)
 {
-  std::cout << "Establishing a UDP socket." << std::endl;
   Errata errata = connect_udp_socket(real_target);
   if (!errata.is_ok()) {
     return errata;
@@ -1506,8 +1500,7 @@ H3Session::run_transactions(
     }
     errata.note(std::move(txn_errata));
   }
-  // TODO call the nghttp3 function to receive a response.
-  // receive_nghttp2_responses(this->get_session(), nullptr, 0, 0, this);
+  receive_responses();
   return errata;
 }
 
@@ -1840,6 +1833,15 @@ H3Session::quic_init_ssl(std::string const &hostname)
   return 0;
 }
 
+void
+H3Session::receive_responses()
+{
+  // TODO: we really need to implement poll with a timeout here.
+  while (!_stream_map.empty()) {
+    nghttp3_data_recv(*this);
+  }
+}
+
 Errata
 H3Session::client_session_init()
 {
@@ -1890,7 +1892,6 @@ H3Session::client_session_init()
       nullptr);
   ngtcp2_addr_init(&path.remote, &this->_endpoint->sa, this->_endpoint->size(), nullptr);
 
-  std::cout << "Calling ngtcp2_conn_client_new" << std::endl;
   auto const rc = ngtcp2_conn_client_new(
       &_quic_socket.qconn,
       &_quic_socket.dcid,
@@ -1903,14 +1904,12 @@ H3Session::client_session_init()
       nullptr,
       this /* The user_data in the ngtcp2 callbacks. */);
   if (rc != 0) {
-    std::cout << "ngtcp2_conn_client_new FAILED" << std::endl;
     errata.error("ngtcp2_conn_client_new failed.");
     return errata;
   }
 
   ngtcp2_conn_set_tls_native_handle(_quic_socket.qconn, _quic_socket.ssl);
 
-  std::cout << "Connection: receiving and sending data" << std::endl;
   nghttp3_data_recv(*this);
 
   int sleep_counter = 0;
@@ -1918,17 +1917,14 @@ H3Session::client_session_init()
   while (!handshake_completed) {
     // Replace this with the polling mechanism.
     if (sleep_counter++ == 1000) {
-      std::cout << "Timed out waiting for nghttp3_data_recv to finish the connection." << std::endl;
       break;
     }
     sleep_for(1ms);
     nghttp3_data_recv(*this);
     handshake_completed = ngtcp2_conn_get_handshake_completed(_quic_socket.qconn);
   }
-  if (handshake_completed) {
-    std::cout << "Handshake completed." << std::endl;
-  } else {
-    std::cout << "Handshake failed." << std::endl;
+  if (!handshake_completed) {
+    errata.error("Timed out waiting for handshake to complete.");
   }
   return errata;
 }

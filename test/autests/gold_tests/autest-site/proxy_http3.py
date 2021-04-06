@@ -108,6 +108,7 @@ class HttpRequestHandler:
         print("request_done_event set!!!")
 
         # TODO: These will be propulated from the server's response eventually.
+        print("Sending a response (supposedly).")
         self.response_headers = [
             (b':status', b'200'),
             (b'X-Response-Header', b'1')]
