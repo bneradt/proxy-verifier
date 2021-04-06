@@ -1700,7 +1700,7 @@ H3Session::write(HttpHeader const &hdr)
           nva,
           num_headers,
           &data_reader,
-          this);
+          stream_state);
     }
   } else { // Empty body.
     if (hdr._is_response) {
@@ -1713,7 +1713,7 @@ H3Session::write(HttpHeader const &hdr)
           nva,
           num_headers,
           nullptr,
-          this);
+          stream_state);
     }
   }
   if (hdr._is_response) {
