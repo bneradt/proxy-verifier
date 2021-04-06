@@ -1734,7 +1734,7 @@ H3Session::write(HttpHeader const &hdr)
     }
   }
 
-  if (ngtcp2_flush_egress(get_fd(), _quic_socket)) {
+  if (!ngtcp2_flush_egress(get_fd(), _quic_socket)) {
     zret.error("Failure calling ngtcp2_flush_egress while writing headers.");
   }
   // TODO: free'ing here is what curl does, but don't we have to read on the
