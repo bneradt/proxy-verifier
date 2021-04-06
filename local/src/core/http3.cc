@@ -487,25 +487,25 @@ static int
 write_client_handshake(QuicSocket *qs, ngtcp2_crypto_level level, const uint8_t *data, size_t len)
 {
   Errata errata;
+  assert(level <= QuicSocket::MAX_NGTCP2_CRYPTO_LEVEL);
   QuicHandshake *crypto_data = &qs->crypto_data[level];
-  auto *buf = crypto_data->buf;
-  if (buf == nullptr) {
-    buf = static_cast<char *>(malloc(QuicHandshake::alloclen));
-    memset(static_cast<void *>(buf), INITIALIZATION_BYTE, sizeof(buf));
-    if (!buf) {
+  if (crypto_data->buf == nullptr) {
+    crypto_data->buf = static_cast<char *>(malloc(QuicHandshake::alloclen));
+    memset(static_cast<void *>(crypto_data->buf), INITIALIZATION_BYTE, sizeof(crypto_data->buf));
+    if (!crypto_data->buf) {
       return 0;
     }
   }
 
   assert(crypto_data->len + len <= QuicHandshake::alloclen);
 
-  memcpy(&buf[crypto_data->len], data, len);
+  memcpy(&crypto_data->buf[crypto_data->len], data, len);
   crypto_data->len += len;
 
   int rv = ngtcp2_conn_submit_crypto_data(
       qs->qconn,
       level,
-      (uint8_t *)(&buf[crypto_data->len] - len),
+      (uint8_t *)(&crypto_data->buf[crypto_data->len] - len),
       len);
   if (rv != 0) {
     errata.error("write_client_handshake failed");
@@ -801,7 +801,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
   }
 
 #if 0
-  // TODO Implement this via polling on the socket.
+  // TODO Implement this via poll() on the socket.
   ngtcp2_duration timeout = 0;
   ngtcp2_tstamp expiry = ngtcp2_conn_get_expiry(qs.qconn);
   if(expiry != UINT64_MAX) {
@@ -819,7 +819,6 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
 }
 
 // TODO:
-// In curl, this is called via Curl_read.
 // In curl, this is ngh3_stream_recv and is called via Curl_read.
 static bool
 nghttp3_data_recv(H3Session &session)
@@ -1439,7 +1438,6 @@ H3Session::connect()
   // In curl, see: lib/vquic/ngtcp2.c:Curl_quic_connect()
   //
 
-  std::cout << "UDP socket configured: now doing quic part." << std::endl;
   errata.note(this->client_session_init());
   if (!errata.is_ok()) {
     errata.error("TLS initialization failed.");
@@ -1819,26 +1817,26 @@ quic_ssl_ctx()
   return ssl_ctx;
 }
 
-static int
-quic_init_ssl(QuicSocket &qs, std::string const &hostname)
+int
+H3Session::quic_init_ssl(std::string const &hostname)
 {
   const uint8_t *alpn = NULL;
   size_t alpnlen = 0;
 
-  assert(qs.ssl);
-  qs.ssl = SSL_new(qs.sslctx);
+  assert(_quic_socket.ssl == nullptr);
+  _quic_socket.ssl = SSL_new(_quic_socket.sslctx);
 
-  SSL_set_app_data(qs.ssl, &qs);
-  SSL_set_connect_state(qs.ssl);
+  SSL_set_app_data(_quic_socket.ssl, this);
+  SSL_set_connect_state(_quic_socket.ssl);
 
   alpn = (const uint8_t *)NGHTTP3_ALPN_H3;
   alpnlen = sizeof(NGHTTP3_ALPN_H3) - 1;
   if(alpn) {
-    SSL_set_alpn_protos(qs.ssl, alpn, (int)alpnlen);
+    SSL_set_alpn_protos(_quic_socket.ssl, alpn, (int)alpnlen);
   }
 
   /* set SNI */
-  SSL_set_tlsext_host_name(qs.ssl, hostname.c_str());
+  SSL_set_tlsext_host_name(_quic_socket.ssl, hostname.c_str());
   return 0;
 }
 
@@ -1849,7 +1847,7 @@ H3Session::client_session_init()
   _quic_socket.version = NGTCP2_PROTO_VER_MAX;
 
   _quic_socket.sslctx = quic_ssl_ctx();
-  quic_init_ssl(_quic_socket, _client_sni);
+  quic_init_ssl(_client_sni);
 
   if (_client_verify_mode != SSL_VERIFY_NONE) {
     errata.diag(
