@@ -162,6 +162,14 @@ public:
   /// The key identifying this HTTP transaction.
   std::string key;
 
+  /** The composed URL parts from :method, :authority, and :path pseudo headers
+   * from the request.
+   *
+   * This is stored in this object to persist its storage because parse_url
+   * assigns from this string TextViews.
+   */
+  std::string composed_url;
+
   /// This is state is for a server receiving a request from a client.
   bool will_receive_request = false;
 
@@ -176,6 +184,8 @@ public:
   std::shared_ptr<HttpHeader> request_from_client;
   /// The HTTP response headers for this stream.
   std::shared_ptr<HttpHeader> response_from_server;
+
+  HttpHeader const *specified_response = nullptr;
 
   char const *body_to_send = nullptr;
   size_t send_body_length = 0;
@@ -228,6 +238,16 @@ public:
   swoc::Errata do_connect(swoc::IPEndpoint const *real_target) override;
 
   static swoc::Errata init(int *process_exit_code);
+
+  /** Indicates that that the user should receive a non-zero status code.
+   *
+   * Most of this code is blocking a procedural and this can be communicated to
+   * the caller via Errata. But the HTTP/2 nghttp2 callbacks do not return
+   * directly to a caller. Therefore this is used to communicate a non-zero
+   * status.
+   */
+  static void set_non_zero_exit_status();
+
 
   /** Perform the HTTP/3 (ngtcp2 and nghttp3) configuration for a client
    * connection. */

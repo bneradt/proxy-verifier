@@ -251,9 +251,7 @@ cb_recv_crypto_data(
   (void)offset;
   (void)user_data;
 
-  std::cout << "in cb_recv_crypto_data" << std::endl;
   if (ngtcp2_crypto_read_write_crypto_data(tconn, crypto_level, data, datalen) != 0) {
-    std::cout << "returning from cb_recv_crypto_data with an error" << std::endl;
     return NGTCP2_ERR_CRYPTO;
   }
 
@@ -282,14 +280,12 @@ cb_recv_stream_data(
   H3Session *h3_session = (H3Session *)conn_data;
   ssize_t nconsumed;
   int fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) ? 1 : 0;
-  std::cout << "in cb_recv_stream_data: " << TextView{(char*)buf, buflen} << ", fin: " << std::to_string(fin) << std::endl;
   (void)offset;
   (void)stream_user_data;
 
   nconsumed =
       nghttp3_conn_read_stream(h3_session->_quic_socket.h3conn, stream_id, buf, buflen, fin);
   if (nconsumed < 0) {
-    std::cout << "returning from cb_recv_stream_data with an error" << std::endl;
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
 
@@ -319,7 +315,6 @@ cb_acked_stream_data_offset(
   (void)datalen;
   (void)stream_user_data;
 
-  std::cout << "in cb_acked_stream_data_offset" << std::endl;
   rv = nghttp3_conn_add_ack_offset(h3_session->_quic_socket.h3conn, stream_id, datalen);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -342,7 +337,6 @@ cb_stream_close(
   (void)stream_user_data;
   /* stream is closed... */
 
-  std::cout << "in cb_stream_close" << std::endl;
   rv = nghttp3_conn_close_stream(h3_session->_quic_socket.h3conn, stream_id, app_error_code);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -358,7 +352,6 @@ cb_extend_max_local_streams_bidi(ngtcp2_conn *tconn, uint64_t max_streams, void 
   (void)max_streams;
   (void)user_data;
 
-  std::cout << "in cb_extend_max_local_streams_bidi" << std::endl;
   return 0;
 }
 
@@ -373,7 +366,6 @@ cb_get_new_connection_id(
   (void)tconn;
   (void)user_data;
 
-  std::cout << "in cb_get_new_connection_id" << std::endl;
   QuicSocket::randomly_populate_array(cid->data, cidlen);
   cid->datalen = cidlen;
 
@@ -398,7 +390,6 @@ cb_stream_reset(
   (void)app_error_code;
   (void)stream_user_data;
 
-  std::cout << "in cb_stream_reset" << std::endl;
   rv = nghttp3_conn_reset_stream(h3_session->_quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -421,7 +412,6 @@ cb_extend_max_stream_data(
   (void)max_data;
   (void)stream_user_data;
 
-  std::cout << "in cb_extend_max_stream_data" << std::endl;
   rv = nghttp3_conn_unblock_stream(h3_session->_quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -674,7 +664,6 @@ ngtcp2_process_ingress(int sockfd, QuicSocket &qs)
     ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, NULL);
 
     // Process the packet.
-    std::cout << "Calling ngtcp2_conn_read_pkt" << std::endl;
     int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
     if (rv != 0) {
       // TODO Send CONNECTION_CLOSE?
@@ -1086,11 +1075,73 @@ cb_h3_end_headers(
     void *stream_user_data)
 {
   (void)conn;
-  (void)stream_id;
   (void)conn_user_data;
 
+  auto *session_data = reinterpret_cast<H3Session *>(conn_user_data);
   auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
   Errata errata;
+  assert(stream_state->will_receive_request || stream_state->will_receive_response);
+  if (stream_state->will_receive_request) {
+    auto &request_from_client = *stream_state->request_from_client;
+    request_from_client.derive_key();
+    stream_state->key = request_from_client.get_key();
+    auto &composed_url = stream_state->composed_url;
+    composed_url = request_from_client._scheme;
+    if (!composed_url.empty()) {
+      composed_url.append("://");
+    }
+    composed_url.append(request_from_client._authority);
+    composed_url.append(request_from_client._path);
+    request_from_client.parse_url(composed_url);
+    errata.diag(
+        "Received an HTTP/2 request for stream id {}:\n{}",
+        stream_id,
+        request_from_client);
+  } else if (stream_state->will_receive_response) {
+    auto &response_from_wire = *stream_state->response_from_server;
+    errata.diag(
+        "Received an HTTP/2 response for stream id {}:\n{}",
+        stream_id,
+        response_from_wire);
+    response_from_wire.derive_key();
+    if (stream_state->key.empty()) {
+      // A response for which we didn't process the request, presumably. A
+      // server push? Maybe? In theory we can support that but currently we
+      // do not. Emit a warning for now.
+      stream_state->key = response_from_wire.get_key();
+      errata.error(
+          "Incoming HTTP/2 response has no key set from the request. Using key from "
+          "response: {}.",
+          stream_state->key);
+    } else {
+      // Make sure the key is set and give preference to the associated
+      // request over the content of the response. There shouldn't be a
+      // difference, but if there is, the user has the YAML file with the
+      // request's key in front of them, and identifying that transaction
+      // is more helpful than so some abberant response's key from the
+      // wire. If they are looking into issues, debug logging will show
+      // the fields of both the request and response.
+      response_from_wire.set_key(stream_state->key);
+    }
+    auto const &key = stream_state->key;
+    auto const &specified_response = stream_state->specified_response;
+    if (response_from_wire.verify_headers(key, *specified_response->_fields_rules)) {
+      errata.error(R"(HTTP/2 response headers did not match expected response headers.)");
+      session_data->set_non_zero_exit_status();
+    }
+    if (specified_response->_status != 0 &&
+        response_from_wire._status != specified_response->_status &&
+        (response_from_wire._status != 200 || specified_response->_status != 304) &&
+        (response_from_wire._status != 304 || specified_response->_status != 200))
+    {
+      errata.error(
+          R"(HTTP/2 Status Violation: expected {} got {}, key={}.)",
+          specified_response->_status,
+          response_from_wire._status,
+          key);
+    }
+  }
+
   if (!stream_state->have_received_headers) {
     errata.error("Stream did not receive any headers for key: {}", stream_state->key);
   }
@@ -1257,6 +1308,13 @@ QuicSocket::randomly_populate_array(uint8_t *array, size_t array_len)
   for (auto i = 0u; i < array_len; ++i) {
     array[i] = uni_id(rng);
   }
+}
+
+// static
+void
+H3Session::set_non_zero_exit_status()
+{
+  *H3Session::process_exit_code = 1;
 }
 
 Errata
@@ -1522,6 +1580,7 @@ H3Session::run_transaction(Txn const &txn)
   Errata errata;
   auto &&[bytes_written, write_errata] = this->write(txn._req);
   errata.note(std::move(write_errata));
+  _last_added_stream->specified_response = &txn._rsp;
   return errata;
 }
 
