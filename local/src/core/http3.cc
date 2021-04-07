@@ -251,8 +251,11 @@ cb_recv_crypto_data(
   (void)offset;
   (void)user_data;
 
-  if (ngtcp2_crypto_read_write_crypto_data(tconn, crypto_level, data, datalen) != 0)
+  std::cout << "in cb_recv_crypto_data" << std::endl;
+  if (ngtcp2_crypto_read_write_crypto_data(tconn, crypto_level, data, datalen) != 0) {
+    std::cout << "returning from cb_recv_crypto_data with an error" << std::endl;
     return NGTCP2_ERR_CRYPTO;
+  }
 
   return 0;
 }
@@ -273,18 +276,20 @@ cb_recv_stream_data(
     uint64_t offset,
     const uint8_t *buf,
     size_t buflen,
-    void *user_data,
+    void *conn_data,
     void *stream_user_data)
 {
-  H3Session *h3_session = (H3Session *)user_data;
+  H3Session *h3_session = (H3Session *)conn_data;
   ssize_t nconsumed;
   int fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) ? 1 : 0;
+  std::cout << "in cb_recv_stream_data: " << TextView{(char*)buf, buflen} << ", fin: " << std::to_string(fin) << std::endl;
   (void)offset;
   (void)stream_user_data;
 
   nconsumed =
       nghttp3_conn_read_stream(h3_session->_quic_socket.h3conn, stream_id, buf, buflen, fin);
   if (nconsumed < 0) {
+    std::cout << "returning from cb_recv_stream_data with an error" << std::endl;
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
 
@@ -303,10 +308,10 @@ cb_acked_stream_data_offset(
     int64_t stream_id,
     uint64_t offset,
     uint64_t datalen,
-    void *user_data,
+    void *conn_data,
     void *stream_user_data)
 {
-  H3Session *h3_session = (H3Session *)user_data;
+  H3Session *h3_session = (H3Session *)conn_data;
   int rv;
   (void)stream_id;
   (void)tconn;
@@ -314,6 +319,7 @@ cb_acked_stream_data_offset(
   (void)datalen;
   (void)stream_user_data;
 
+  std::cout << "in cb_acked_stream_data_offset" << std::endl;
   rv = nghttp3_conn_add_ack_offset(h3_session->_quic_socket.h3conn, stream_id, datalen);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -327,15 +333,16 @@ cb_stream_close(
     ngtcp2_conn *tconn,
     int64_t stream_id,
     uint64_t app_error_code,
-    void *user_data,
+    void *conn_data,
     void *stream_user_data)
 {
-  H3Session *h3_session = (H3Session *)user_data;
+  H3Session *h3_session = (H3Session *)conn_data;
   int rv;
   (void)tconn;
   (void)stream_user_data;
   /* stream is closed... */
 
+  std::cout << "in cb_stream_close" << std::endl;
   rv = nghttp3_conn_close_stream(h3_session->_quic_socket.h3conn, stream_id, app_error_code);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -351,6 +358,7 @@ cb_extend_max_local_streams_bidi(ngtcp2_conn *tconn, uint64_t max_streams, void 
   (void)max_streams;
   (void)user_data;
 
+  std::cout << "in cb_extend_max_local_streams_bidi" << std::endl;
   return 0;
 }
 
@@ -365,6 +373,7 @@ cb_get_new_connection_id(
   (void)tconn;
   (void)user_data;
 
+  std::cout << "in cb_get_new_connection_id" << std::endl;
   QuicSocket::randomly_populate_array(cid->data, cidlen);
   cid->datalen = cidlen;
 
@@ -379,16 +388,17 @@ cb_stream_reset(
     int64_t stream_id,
     uint64_t final_size,
     uint64_t app_error_code,
-    void *user_data,
+    void *conn_data,
     void *stream_user_data)
 {
-  H3Session *h3_session = (H3Session *)user_data;
+  H3Session *h3_session = (H3Session *)conn_data;
   int rv;
   (void)tconn;
   (void)final_size;
   (void)app_error_code;
   (void)stream_user_data;
 
+  std::cout << "in cb_stream_reset" << std::endl;
   rv = nghttp3_conn_reset_stream(h3_session->_quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -402,15 +412,16 @@ cb_extend_max_stream_data(
     ngtcp2_conn *tconn,
     int64_t stream_id,
     uint64_t max_data,
-    void *user_data,
+    void *conn_data,
     void *stream_user_data)
 {
-  H3Session *h3_session = (H3Session *)user_data;
+  H3Session *h3_session = (H3Session *)conn_data;
   int rv;
   (void)tconn;
   (void)max_data;
   (void)stream_user_data;
 
+  std::cout << "in cb_extend_max_stream_data" << std::endl;
   rv = nghttp3_conn_unblock_stream(h3_session->_quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -663,6 +674,7 @@ ngtcp2_process_ingress(int sockfd, QuicSocket &qs)
     ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, NULL);
 
     // Process the packet.
+    std::cout << "Calling ngtcp2_conn_read_pkt" << std::endl;
     int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
     if (rv != 0) {
       // TODO Send CONNECTION_CLOSE?
@@ -895,12 +907,12 @@ cb_h3_readfunction(
     nghttp3_vec *vec,
     size_t veccnt,
     uint32_t *pflags,
-    void *user_data,
+    void *conn_data,
     void *stream_user_data)
 {
   (void)conn;
   (void)stream_id;
-  (void)user_data;
+  (void)conn_data;
   (void)veccnt;
 
   Errata errata;

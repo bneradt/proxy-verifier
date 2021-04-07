@@ -111,7 +111,7 @@ class HttpRequestHandler:
         print("Sending a response (supposedly).")
         self.response_headers = [
             (b':status', b'200'),
-            (b'X-Response-Header', b'1')]
+            (b'x-response-header', b'1')]
         self.response_body = b'Some great body'
         # End TODO
 
