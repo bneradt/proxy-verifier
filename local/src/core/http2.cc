@@ -735,21 +735,22 @@ on_stream_close_cb(
   errata.diag("HTTP/2 stream is closed with id: {}", stream_id);
   H2Session *session_data = reinterpret_cast<H2Session *>(user_data);
   auto iter = session_data->_stream_map.find(stream_id);
-  if (iter != session_data->_stream_map.end()) {
-    H2StreamState &stream_state = *iter->second;
-    auto const &message_start = stream_state._stream_start;
-    auto const message_end = ClockType::now();
-    auto const elapsed_ms = duration_cast<chrono::milliseconds>(message_end - message_start);
-    if (elapsed_ms > Transaction_Delay_Cutoff) {
-      errata.error(
-          R"(HTTP/2 transaction in stream id {} having key={} took {}.)",
-          stream_id,
-          stream_state._key,
-          elapsed_ms);
-    }
-    stream_state.set_stream_has_closed();
-    session_data->_stream_map.erase(iter);
+  if (iter == session_data->_stream_map.end()) {
+    errata.error("HTTP/2 stream is closed with id {} but could not find it tracked internally", stream_id);
+    return 0;
   }
+  H2StreamState &stream_state = *iter->second;
+  auto const &message_start = stream_state._stream_start;
+  auto const message_end = ClockType::now();
+  auto const elapsed_ms = duration_cast<chrono::milliseconds>(message_end - message_start);
+  if (elapsed_ms > Transaction_Delay_Cutoff) {
+    errata.error(
+        R"(HTTP/2 transaction in stream id {} with key {} took {}.)",
+        stream_id,
+        stream_state._key,
+        elapsed_ms);
+  }
+  session_data->_stream_map.erase(iter);
   return 0;
 }
 
@@ -804,18 +805,6 @@ H2StreamState::~H2StreamState()
     free(_response_nv_headers);
     _response_nv_headers = nullptr;
   }
-}
-
-void
-H2StreamState::set_stream_has_closed()
-{
-  _stream_has_closed = true;
-}
-
-bool
-H2StreamState::get_stream_has_closed() const
-{
-  return _stream_has_closed;
 }
 
 void

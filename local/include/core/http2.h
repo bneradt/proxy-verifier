@@ -45,12 +45,6 @@ public:
    */
   swoc::TextView register_rcbuf(nghttp2_rcbuf *rcbuf);
 
-  /** Indicate that the stream has closed. */
-  void set_stream_has_closed();
-
-  /** Return whether this stream has closed. */
-  bool get_stream_has_closed() const;
-
   /** Set the stream_id for this and the appropriate members. */
   void set_stream_id(int32_t id);
 
@@ -87,7 +81,6 @@ public:
 private:
   int32_t _stream_id = -1;
   std::deque<nghttp2_rcbuf *> _rcbufs_to_free;
-  bool _stream_has_closed = false;
   nghttp2_nv *_request_nv_headers = nullptr;
   nghttp2_nv *_response_nv_headers = nullptr;
 };

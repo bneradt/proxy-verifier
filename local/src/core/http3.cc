@@ -954,16 +954,29 @@ cb_h3_stream_close(
 {
   (void)conn;
   (void)app_error_code;
-  (void)stream_user_data;
 
   Errata errata;
-
-  auto *session = reinterpret_cast<H3Session *>(conn_user_data);
-  session->_stream_map.erase(stream_id);
-
   errata.diag("HTTP/3 stream is closed with id: {}", stream_id);
 
-  // TODO: add timing information.
+  auto *session = reinterpret_cast<H3Session *>(conn_user_data);
+  auto iter = session->_stream_map.find(stream_id);
+  if (iter == session->_stream_map.end()) {
+    errata.error("HTTP/3 stream is closed with id {} but could not find it tracked internally", stream_id);
+    return 0;
+  }
+  auto &stream_state = *reinterpret_cast<H3StreamState *>(stream_user_data);
+  auto const &message_start = stream_state.stream_start;
+  auto const message_end = ClockType::now();
+  auto const elapsed_ms = duration_cast<chrono::milliseconds>(message_end - message_start);
+  if (elapsed_ms > Transaction_Delay_Cutoff) {
+    errata.error(
+        R"(HTTP/3 transaction in stream id {} with key {} took {}.)",
+        stream_id,
+        stream_state.key,
+        elapsed_ms);
+  }
+
+  session->_stream_map.erase(stream_id);
 
   /* make sure that ngh3_stream_recv is called again to complete the transfer
    * even if there are no more packets to be received from the server. */
