@@ -39,6 +39,7 @@ using swoc::Errata;
 using swoc::TextView;
 using swoc::bwf::Ngtcp2Error;
 using swoc::bwf::Nghttp3Error;
+using swoc::bwf::Errno;
 using namespace swoc::literals;
 using namespace std::literals;
 using std::this_thread::sleep_for;
@@ -219,13 +220,13 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Nghttp3Error const &error)
  *
  * @return True on success, false on failure.
  */
-static bool ngtcp2_process_ingress(int sockfd, QuicSocket &qs);
+static bool ngtcp2_process_ingress(H3Session &session);
 
 /** Send data on the socket.
  *
- * @return True on success, false on failure.
+ * @return -1 on failure, otherwise the number of bytes sent.
  */
-static bool ngtcp2_flush_egress(int sockfd, QuicSocket &qs);
+static int ngtcp2_flush_egress(H3Session &session);
 
 // This satisifies the ngtcp timestamp needs.
 static long
@@ -628,59 +629,82 @@ static ngtcp2_callbacks server_ngtcp2_callbacks = {
 // --------------------------------------------
 
 static bool
-ngtcp2_process_ingress(int sockfd, QuicSocket &qs)
+ngtcp2_process_ingress(H3Session &session)
 {
   uint8_t buf[65536];
   size_t bufsize = sizeof(buf);
   struct sockaddr_storage remote_addr;
   socklen_t remote_addrlen = sizeof(remote_addr);
-  ngtcp2_path path;
-  ngtcp2_tstamp ts = timestamp();
-  ngtcp2_pkt_info pi = {0};
-
+  ssize_t recvd = 0;
   Errata errata;
 
   for (;;) {
-    ssize_t recvd = 0;
-    while ((recvd = recvfrom(
-                sockfd,
+    recvd = recvfrom(
+                session.get_fd(),
                 (char *)buf,
                 bufsize,
                 0,
                 (struct sockaddr *)&remote_addr,
-                &remote_addrlen)) == -1 &&
-           errno == EINTR)
-      ;
+                &remote_addrlen);
+    if (recvd > 0) {
+      // Success. We read data off the socket.
+      break;
+    }
     if (recvd == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        break;
+      if (errno == EINTR) {
+        continue;
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        auto &&[poll_return, poll_errata] = session.poll_for_data_on_socket(Poll_Timeout);
+        errata.note(std::move(poll_errata));
+        if (!errata.is_ok()) {
+          errata.note(std::move(poll_errata));
+          errata.error("Failed to poll for HTTP/3 data.");
+          session.close();
+          return false;
+        } else if (poll_return > 0) {
+          // Simply repeat the read now that poll says something is ready.
+        } else if (poll_return == 0) {
+          errata.error("Poll timed out waiting to read HTTP/3 content.");
+          session.close();
+          return false;
+        } else if (poll_return < 0) {
+          // Connection was closed. Nothing to do.
+          errata.diag("The peer closed the HTTP/3 connection while reading during poll.");
+          return true;
+        }
+        continue;
+      } else {
+        errata.error("ngtcp2_process_ingress: unexpected recvfrom() errno: {}", Errno{});
+        return false;
       }
-
-      errata.error("ngtcp2_process_ingress: recvfrom() unexpectedly returned {}", recvd);
-      return false;
     }
+  }
 
-    ngtcp2_addr_init(&path.local, (struct sockaddr *)&qs.local_addr, qs.local_addrlen, NULL);
-    ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, NULL);
+  ngtcp2_path path;
+  ngtcp2_tstamp ts = timestamp();
+  ngtcp2_pkt_info pi = {0};
 
-    // Process the packet.
-    int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
-    if (rv != 0) {
-      // TODO Send CONNECTION_CLOSE?
-      errata.error(
-          "ngtcp2_process_ingress: ngtcp2_conn_read_pkt() had an error return: {}",
-          Ngtcp2Error{rv});
-      return false;
-    }
+  // TODO: review our _ variable names. Public ones should not have _.
+  auto &qs = session._quic_socket;
+  ngtcp2_addr_init(&path.local, (struct sockaddr *)&qs.local_addr, qs.local_addrlen, NULL);
+  ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, NULL);
+
+  // Process the packet.
+  int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
+  if (rv != 0) {
+    // TODO Send CONNECTION_CLOSE?
+    errata.error(
+        "ngtcp2_process_ingress: ngtcp2_conn_read_pkt() had an error return: {}",
+        Ngtcp2Error{rv});
+    return false;
   }
   return true;
 }
 
-static bool
-ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
+static int
+ngtcp2_flush_egress(H3Session &session)
 {
   int rv;
-  ssize_t sent;
   ssize_t outlen;
   uint8_t out[NGTCP2_MAX_PKTLEN_IPV4];
   size_t pktlen;
@@ -693,8 +717,11 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
   nghttp3_vec vec[16];
   ssize_t ndatalen;
   uint32_t flags;
+  int num_bytes_sent = 0;
 
   Errata errata;
+
+  auto &qs = session._quic_socket;
 
   switch (qs.local_addr.ss_family) {
   case AF_INET:
@@ -712,7 +739,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
   rv = ngtcp2_conn_handle_expiry(qs.qconn, ts);
   if (rv != 0) {
     errata.error("ngtcp2_conn_handle_expiry returned error: {}", Ngtcp2Error{rv});
-    return false;
+    return -1;
   }
 
   ngtcp2_path_storage_zero(&ps);
@@ -731,7 +758,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
           sizeof(vec) / sizeof(vec[0]));
       if (veccnt < 0) {
         errata.error("nghttp3_conn_writev_stream returned error: {}", Nghttp3Error{(int)veccnt});
-        return false;
+        return -1;
       }
     }
 
@@ -749,6 +776,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
         veccnt,
         ts);
     if (outlen == 0) {
+      // Nothing more to write.
       break;
     }
     if (outlen < 0) {
@@ -757,7 +785,7 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
         rv = nghttp3_conn_block_stream(qs.h3conn, stream_id);
         if (rv != 0) {
           errata.error("nghttp3_conn_block_stream returned error: {}", Nghttp3Error{rv});
-          return false;
+          return -1;
         }
         continue;
       } else if (outlen == NGTCP2_ERR_WRITE_MORE) {
@@ -765,53 +793,52 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
         rv = nghttp3_conn_add_write_offset(qs.h3conn, stream_id, ndatalen);
         if (rv != 0) {
           errata.error("nghttp3_conn_add_write_offset returned error: {}", Nghttp3Error{rv});
-          return false;
+          return -1;
         }
         continue;
       } else {
         assert(ndatalen == -1);
         errata.error("ngtcp2_conn_writev_stream returned error: {}", Ngtcp2Error{(int)outlen});
-        return false;
+        return -1;
       }
     } else if (ndatalen >= 0) {
       rv = nghttp3_conn_add_write_offset(qs.h3conn, stream_id, ndatalen);
       if (rv != 0) {
         errata.error("nghttp3_conn_add_write_offset returned error: {}", Nghttp3Error{rv});
-        return false;
+        return -1;
       }
     }
 
     memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
-    while ((sent = send(sockfd, (const char *)out, outlen, 0)) == -1 && errno == EINTR)
-      ;
-
-    if (sent == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        /* TODO Cache packet */
-        break;
+    ssize_t sent = 0;
+    while ((sent = send(session.get_fd(), (const char *)out, outlen, 0)) == -1) {
+      if (errno == EINTR) {
+        continue;
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        auto &&[poll_return, poll_errata] = session.poll_for_data_on_socket(Poll_Timeout, POLLOUT);
+        errata.note(std::move(poll_errata));
+        if (poll_return > 0) {
+          // The socket is available again for writing. Simply repeat the write.
+          continue;
+        } else if (!errata.is_ok()) {
+          errata.error("Error polling on a socket to write: {}", swoc::bwf::Errno{});
+          return -1;
+        } else if (poll_return == 0) {
+          errata.error("Timed out waiting to write to a socket.");
+          return -1;
+        } else if (poll_return < 0) {
+          errata.diag("write failed during poll: session is closed");
+          return true;
+        }
       } else {
-        errata.error("send() returned {}: {}", sent, swoc::bwf::Errno{});
-        return false;
+        errata.error("send() failed: {}", swoc::bwf::Errno{});
+        return -1;
       }
     }
+    num_bytes_sent += sent;
   }
 
-#if 0
-  // TODO Implement this via poll() on the socket.
-  ngtcp2_duration timeout = 0;
-  ngtcp2_tstamp expiry = ngtcp2_conn_get_expiry(qs.qconn);
-  if(expiry != UINT64_MAX) {
-    if(expiry <= ts) {
-      timeout = NGTCP2_MILLISECONDS;
-    }
-    else {
-      timeout = expiry - ts;
-    }
-    Curl_expire(data, timeout / NGTCP2_MILLISECONDS, EXPIRE_QUIC);
-  }
-#endif
-
-  return true;
+  return num_bytes_sent;
 }
 
 // TODO:
@@ -819,13 +846,10 @@ ngtcp2_flush_egress(int sockfd, QuicSocket &qs)
 static bool
 nghttp3_data_recv(H3Session &session)
 {
-  int sockfd = session.get_fd();
-  QuicSocket &qs = session._quic_socket;
-
-  if (!ngtcp2_process_ingress(sockfd, qs)) {
+  if (!ngtcp2_process_ingress(session)) {
     return false;
   }
-  if (!ngtcp2_flush_egress(sockfd, qs)) {
+  if (ngtcp2_flush_egress(session) < 0) {
     return false;
   }
   return true;
@@ -1340,7 +1364,7 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
   Errata errata;
   int const socket_fd = socket(real_target->family(), SOCK_DGRAM, 0);
   if (0 > socket_fd) {
-    errata.error(R"(Failed to open a UDP socket - {})", swoc::bwf::Errno{});
+    errata.error(R"(Failed to open a UDP socket - {})", Errno{});
     return errata;
   }
   static constexpr int ONE = 1;
@@ -1349,7 +1373,7 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
   l.l_linger = 0;
   setsockopt(socket_fd, SOL_SOCKET, SO_LINGER, (char *)&l, sizeof(l));
   if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &ONE, sizeof(int)) < 0) {
-    errata.error(R"(Could not set reuseaddr on socket {} - {}.)", socket_fd, swoc::bwf::Errno{});
+    errata.error(R"(Could not set reuseaddr on socket {} - {}.)", socket_fd, Errno{});
     return errata;
   }
   errata.note(this->set_fd(socket_fd));
@@ -1358,14 +1382,14 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
   }
 
   if (-1 == ::connect(socket_fd, &real_target->sa, real_target->size())) {
-    errata.error(R"(Failed to connect socket {}: - {})", *real_target, swoc::bwf::Errno{});
+    errata.error(R"(Failed to connect socket {}: - {})", *real_target, Errno{});
     return errata;
   }
   if (0 != ::fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK)) {
     errata.error(
         R"(Failed to make the client socket non-blocking {}: - {})",
         *real_target,
-        swoc::bwf::Errno{});
+        Errno{});
     return errata;
   }
   this->_endpoint = real_target;
@@ -1815,7 +1839,7 @@ H3Session::write(HttpHeader const &hdr)
     }
   }
 
-  if (!ngtcp2_flush_egress(get_fd(), _quic_socket)) {
+  if (ngtcp2_flush_egress(*this) < 0) {
     zret.error("Failure calling ngtcp2_flush_egress while writing headers.");
   }
   // TODO: free'ing here is what curl does, but don't we have to read on the
@@ -1924,7 +1948,6 @@ H3Session::quic_init_ssl(std::string const &hostname)
 void
 H3Session::receive_responses()
 {
-  // TODO: we really need to implement poll with a timeout here.
   while (!_stream_map.empty()) {
     nghttp3_data_recv(*this);
   }
@@ -1967,7 +1990,7 @@ H3Session::client_session_init()
       (struct sockaddr *)&_quic_socket.local_addr,
       &_quic_socket.local_addrlen);
   if (rv == -1) {
-    errata.error("getsockname failed: {}", swoc::bwf::Errno{});
+    errata.error("getsockname failed: {}", Errno{});
     return errata;
   }
 
@@ -1998,16 +2021,16 @@ H3Session::client_session_init()
 
   ngtcp2_conn_set_tls_native_handle(_quic_socket.qconn, _quic_socket.ssl);
 
-  nghttp3_data_recv(*this);
+  // Commence handshake.
+  if (ngtcp2_flush_egress(*this) < 0) {
+    errata.error("Error writing bytes during QUIC TLS handshake.");
+    return errata;
+  }
 
-  int sleep_counter = 0;
+  // Now that we went our first packet, exchange packets until the handshake is
+  // complete.
   bool handshake_completed = ngtcp2_conn_get_handshake_completed(_quic_socket.qconn);
   while (!handshake_completed) {
-    // Replace this with the polling mechanism.
-    if (sleep_counter++ == 1000) {
-      break;
-    }
-    sleep_for(1ms);
     nghttp3_data_recv(*this);
     handshake_completed = ngtcp2_conn_get_handshake_completed(_quic_socket.qconn);
   }
