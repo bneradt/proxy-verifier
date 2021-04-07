@@ -48,7 +48,7 @@ inline namespace SWOC_VERSION_NS
 BufferWriter &
 bwformat(BufferWriter &w, bwf::Spec const & /* spec */, HttpHeader const &h)
 {
-  if (h._is_http2) {
+  if (h._is_http2 || h._is_http3) {
     if (h._status) {
       w.print(R"(- ":status": "{}"{})", h._status_string, '\n');
     } else {
@@ -57,7 +57,6 @@ bwformat(BufferWriter &w, bwf::Spec const & /* spec */, HttpHeader const &h)
       w.print(R"(- ":authority": "{}"{})", h._authority, '\n');
       w.print(R"(- ":path": "{}"{})", h._path, '\n');
     }
-  } else {
   }
   for (auto const &[key, value] : h._fields_rules->_fields_sequence) {
     if (key.starts_with(":")) {

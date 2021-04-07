@@ -961,7 +961,9 @@ cb_h3_stream_close(
   auto *session = reinterpret_cast<H3Session *>(conn_user_data);
   session->_stream_map.erase(stream_id);
 
-  errata.diag("HTTP/3 Stream is closed with id: {}", stream_id);
+  errata.diag("HTTP/3 stream is closed with id: {}", stream_id);
+
+  // TODO: add timing information.
 
   /* make sure that ngh3_stream_recv is called again to complete the transfer
    * even if there are no more packets to be received from the server. */
@@ -1094,15 +1096,12 @@ cb_h3_end_headers(
     composed_url.append(request_from_client._path);
     request_from_client.parse_url(composed_url);
     errata.diag(
-        "Received an HTTP/2 request for stream id {}:\n{}",
+        "Received an HTTP/2 request for key {} with stream id {}:\n{}",
+        stream_state->key,
         stream_id,
         request_from_client);
   } else if (stream_state->will_receive_response) {
     auto &response_from_wire = *stream_state->response_from_server;
-    errata.diag(
-        "Received an HTTP/2 response for stream id {}:\n{}",
-        stream_id,
-        response_from_wire);
     response_from_wire.derive_key();
     if (stream_state->key.empty()) {
       // A response for which we didn't process the request, presumably. A
@@ -1123,6 +1122,11 @@ cb_h3_end_headers(
       // the fields of both the request and response.
       response_from_wire.set_key(stream_state->key);
     }
+    errata.diag(
+        "Received an HTTP/2 response for key {} with stream id {}:\n{}",
+        stream_state->key,
+        stream_id,
+        response_from_wire);
     auto const &key = stream_state->key;
     auto const &specified_response = stream_state->specified_response;
     if (response_from_wire.verify_headers(key, *specified_response->_fields_rules)) {
@@ -1594,8 +1598,8 @@ H3StreamState::register_rcbuf(nghttp3_rcbuf *rcbuf)
 }
 
 H3StreamState::H3StreamState(bool is_client)
-  : will_receive_request{is_client}
-  , will_receive_response{!is_client}
+  : will_receive_request{!is_client}
+  , will_receive_response{is_client}
   , stream_start{ClockType::now()}
   , request_from_client{std::make_shared<HttpHeader>()}
   , response_from_server{std::make_shared<HttpHeader>()}

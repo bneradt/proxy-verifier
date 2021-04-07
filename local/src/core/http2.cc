@@ -732,7 +732,7 @@ on_stream_close_cb(
     void *user_data)
 {
   Errata errata;
-  errata.diag("HTTP/2 Stream is closed with id: {}", stream_id);
+  errata.diag("HTTP/2 stream is closed with id: {}", stream_id);
   H2Session *session_data = reinterpret_cast<H2Session *>(user_data);
   auto iter = session_data->_stream_map.find(stream_id);
   if (iter != session_data->_stream_map.end()) {
