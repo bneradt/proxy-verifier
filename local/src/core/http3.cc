@@ -485,7 +485,11 @@ quic_set_encryption_secrets(
 }
 
 static int
-write_client_handshake(QuicSocket *qs, ngtcp2_crypto_level level, const uint8_t *data, size_t data_len)
+write_client_handshake(
+    QuicSocket *qs,
+    ngtcp2_crypto_level level,
+    const uint8_t *data,
+    size_t data_len)
 {
   Errata errata;
   assert(level <= QuicSocket::MAX_NGTCP2_CRYPTO_LEVEL);
@@ -506,11 +510,7 @@ write_client_handshake(QuicSocket *qs, ngtcp2_crypto_level level, const uint8_t 
   // Copy data into our buffer so that we will preserve it for the OpenSSL API.
   buf.insert(buf.end(), data, data + data_len);
 
-  int rv = ngtcp2_conn_submit_crypto_data(
-      qs->qconn,
-      level,
-      copied_data_start,
-      data_len);
+  int rv = ngtcp2_conn_submit_crypto_data(qs->qconn, level, copied_data_start, data_len);
   if (rv != 0) {
     errata.error("write_client_handshake failed");
   }
@@ -642,12 +642,12 @@ ngtcp2_process_ingress(H3Session &session)
 
   for (;;) {
     recvd = recvfrom(
-                session.get_fd(),
-                (char *)buf,
-                bufsize,
-                0,
-                (struct sockaddr *)&remote_addr,
-                &remote_addrlen);
+        session.get_fd(),
+        (char *)buf,
+        bufsize,
+        0,
+        (struct sockaddr *)&remote_addr,
+        &remote_addrlen);
     if (recvd > 0) {
       // Success. We read data off the socket.
       break;
@@ -938,11 +938,8 @@ cb_h3_readfunction(
     *pflags = NGHTTP3_DATA_FLAG_EOF;
     return 0;
   }
-  // TODO: we won't need offset if things work this way. If things go wonky
-  // with larger bodies, then we have to impart a cap and send in chunks. Then
-  // the offset will be helpful.
-  vec[0].base = (uint8_t *)stream_state->body_to_send + stream_state->send_body_offset;
-  vec[0].len = stream_state->send_body_length - stream_state->send_body_offset;
+  vec[0].base = (uint8_t *)stream_state->body_to_send;
+  vec[0].len = stream_state->send_body_length;
   *pflags = NGHTTP3_DATA_FLAG_EOF;
 
   return 1;
@@ -959,14 +956,10 @@ cb_h3_acked_stream_data(
 {
   (void)conn;
   (void)stream_id;
+  (void)datalen;
   (void)conn_user_data;
+  (void)stream_user_data;
 
-  Errata errata;
-  // TODO: if send cb_h3_readfunction can really just populate base and len
-  // like it's doing, this function probably doesn't even need to do what it's
-  // doing.
-  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
-  stream_state->send_body_offset += datalen;
   return 0;
 }
 
@@ -987,7 +980,9 @@ cb_h3_stream_close(
   auto *session = reinterpret_cast<H3Session *>(conn_user_data);
   auto iter = session->_stream_map.find(stream_id);
   if (iter == session->_stream_map.end()) {
-    errata.error("HTTP/3 stream is closed with id {} but could not find it tracked internally", stream_id);
+    errata.error(
+        "HTTP/3 stream is closed with id {} but could not find it tracked internally",
+        stream_id);
     return 0;
   }
   auto &stream_state = *reinterpret_cast<H3StreamState *>(stream_user_data);
@@ -1330,6 +1325,8 @@ QuicHandshake::QuicHandshake()
 
 QuicSocket::QuicSocket()
 {
+  // Zero out all of our data so that if it gets uses uninitialized by mistake
+  // at least it will fail early and consistently.
   memset(&dcid, 0, sizeof(dcid));
   memset(&scid, 0, sizeof(scid));
   memset(&settings, 0, sizeof(settings));
@@ -1361,10 +1358,10 @@ H3Session::set_non_zero_exit_status()
 }
 
 Errata
-H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
+H3Session::connect_udp_socket(swoc::IPEndpoint const *target)
 {
   Errata errata;
-  int const socket_fd = socket(real_target->family(), SOCK_DGRAM, 0);
+  int const socket_fd = socket(target->family(), SOCK_DGRAM, 0);
   if (0 > socket_fd) {
     errata.error(R"(Failed to open a UDP socket - {})", Errno{});
     return errata;
@@ -1383,25 +1380,22 @@ H3Session::connect_udp_socket(swoc::IPEndpoint const *real_target)
     return errata;
   }
 
-  if (-1 == ::connect(socket_fd, &real_target->sa, real_target->size())) {
-    errata.error(R"(Failed to connect socket {}: - {})", *real_target, Errno{});
+  if (-1 == ::connect(socket_fd, &target->sa, target->size())) {
+    errata.error(R"(Failed to connect socket {}: - {})", *target, Errno{});
     return errata;
   }
   if (0 != ::fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK)) {
-    errata.error(
-        R"(Failed to make the client socket non-blocking {}: - {})",
-        *real_target,
-        Errno{});
+    errata.error(R"(Failed to make the client socket non-blocking {}: - {})", *target, Errno{});
     return errata;
   }
-  this->_endpoint = real_target;
+  this->_endpoint = target;
   return errata;
 }
 
 Errata
-H3Session::do_connect(swoc::IPEndpoint const *real_target)
+H3Session::do_connect(swoc::IPEndpoint const *target)
 {
-  Errata errata = connect_udp_socket(real_target);
+  Errata errata = connect_udp_socket(target);
   if (!errata.is_ok()) {
     return errata;
   }
@@ -1559,33 +1553,33 @@ H3Session::connect()
 
 Errata
 H3Session::run_transactions(
-    std::list<Txn> const &txn_list,
-    swoc::IPEndpoint const *real_target,
+    std::list<Txn> const &transactions,
+    swoc::IPEndpoint const *target,
     double rate_multiplier)
 {
   Errata errata;
 
   auto const first_time = ClockType::now();
-  for (auto const &txn : txn_list) {
+  for (auto const &transaction : transactions) {
     Errata txn_errata;
-    auto const key{txn._req.get_key()};
+    auto const key{transaction._req.get_key()};
     if (this->is_closed()) {
-      txn_errata.note(this->do_connect(real_target));
+      txn_errata.note(this->do_connect(target));
       if (!txn_errata.is_ok()) {
         txn_errata.error(R"(Failed to reconnect HTTP/2 key={}.)", key);
         // If we don't have a valid connection, there's no point in continuing.
         break;
       }
     }
-    if (rate_multiplier != 0 || txn._user_specified_delay_duration > 0us) {
+    if (rate_multiplier != 0 || transaction._user_specified_delay_duration > 0us) {
       std::chrono::duration<double, std::micro> delay_time = 0ms;
       auto current_time = ClockType::now();
       auto next_time = current_time + delay_time;
-      if (txn._user_specified_delay_duration > 0us) {
-        delay_time = txn._user_specified_delay_duration;
+      if (transaction._user_specified_delay_duration > 0us) {
+        delay_time = transaction._user_specified_delay_duration;
         next_time = current_time + delay_time;
       } else {
-        auto const start_offset = txn._start;
+        auto const start_offset = transaction._start;
         next_time = (rate_multiplier * start_offset) + first_time;
         delay_time = next_time - current_time;
       }
@@ -1607,7 +1601,7 @@ H3Session::run_transactions(
         sleep_for(delay_time);
       }
     }
-    txn_errata.note(this->run_transaction(txn));
+    txn_errata.note(this->run_transaction(transaction));
     if (!txn_errata.is_ok()) {
       txn_errata.error(R"(Failed HTTP/2 transaction with key={}.)", key);
     }
@@ -1618,12 +1612,12 @@ H3Session::run_transactions(
 }
 
 Errata
-H3Session::run_transaction(Txn const &txn)
+H3Session::run_transaction(Txn const &transaction)
 {
   Errata errata;
-  auto &&[bytes_written, write_errata] = this->write(txn._req);
+  auto &&[bytes_written, write_errata] = this->write(transaction._req);
   errata.note(std::move(write_errata));
-  _last_added_stream->specified_response = &txn._rsp;
+  _last_added_stream->specified_response = &transaction._rsp;
   return errata;
 }
 
@@ -1850,6 +1844,8 @@ H3Session::write(HttpHeader const &hdr)
   return zret;
 }
 
+// TODO: this is not used yet. A new one is created per connection can we
+// change that to make this common across all sessions?
 SSL_CTX *H3Session::h3_client_context = nullptr;
 SSL_CTX *H3Session::h3_server_context = nullptr;
 
@@ -1900,12 +1896,12 @@ quic_ssl_ctx()
 
   SSL_CTX_set_default_verify_paths(ssl_ctx);
 
-  if(SSL_CTX_set_ciphersuites(ssl_ctx, QUIC_CIPHERS) != 1) {
+  if (SSL_CTX_set_ciphersuites(ssl_ctx, QUIC_CIPHERS) != 1) {
     errata.error("SSL_CTX_set_ciphersuites failed: {}", swoc::bwf::SSLError{});
     return nullptr;
   }
 
-  if(SSL_CTX_set1_groups_list(ssl_ctx, QUIC_GROUPS) != 1) {
+  if (SSL_CTX_set1_groups_list(ssl_ctx, QUIC_GROUPS) != 1) {
     errata.error("SSL_CTX_set1_groups_list failed: {}", swoc::bwf::SSLError{});
     return nullptr;
   }
@@ -1938,7 +1934,7 @@ H3Session::quic_init_ssl(std::string const &hostname)
 
   alpn = (const uint8_t *)NGHTTP3_ALPN_H3;
   alpnlen = sizeof(NGHTTP3_ALPN_H3) - 1;
-  if(alpn) {
+  if (alpn) {
     SSL_set_alpn_protos(_quic_socket.ssl, alpn, (int)alpnlen);
   }
 
@@ -1968,7 +1964,10 @@ H3Session::client_session_init()
     errata.diag(
         R"(Setting client H3 verification mode against the proxy to: {}.)",
         _client_verify_mode);
-    SSL_set_verify(_quic_socket.ssl, _client_verify_mode, nullptr /* No verify_callback is passed */);
+    SSL_set_verify(
+        _quic_socket.ssl,
+        _client_verify_mode,
+        nullptr /* No verify_callback is passed */);
   }
 
   _quic_socket.dcid.datalen = NGTCP2_MAX_CIDLEN;
