@@ -19,6 +19,7 @@
 #include <random>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "swoc/BufferWriter.h"
 #include "swoc/Errata.h"
@@ -57,25 +58,28 @@ BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Nghttp3Error
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 
-// TODO: this is copied from curl's ngtcp2.h. That is a c file. Refactor using
-// C++ principles.
+/** Encapsulate the buffer for the QUIC TLS hanshake. */
 class QuicHandshake
 {
 public:
-  QuicHandshake() = default;
+  QuicHandshake();
+  ~QuicHandshake() = default;
+
   QuicHandshake(QuicHandshake const &) = delete;
   QuicHandshake &operator=(QuicHandshake const &) = delete;
-  ~QuicHandshake();
 
 public:
-  char *buf = nullptr;
+  std::vector<char> buf;
 
-  /* TODO (from CURL source code).
-   * Just pretend that handshake does not grow more than 4KiB for
-   * now */
-  static constexpr size_t alloclen = 4096;
-  size_t len = 0;
-  size_t nread = 0;
+  /** This is the maximum number of bytes we expect to use for the TLS
+   * handshake.
+   *
+   * This max value is taken from CURL code which has a comment expressing
+   * tentative hope that this should be large enough. There is an assertion in
+   * our (and theirs, I believe) implementation guarding this invariant. If we
+   * trip that, we may need to expand this.
+   */
+  static constexpr size_t max_handshake_size = 4 * 1024;
 };
 
 // TODO: this is copied from curl's ngtcp2.h. That is a c file. Refactor using

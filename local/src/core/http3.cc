@@ -6,7 +6,7 @@
  */
 
 #include "core/http3.h"
-#include "core/https.h" // TODO: is this needed anymore?
+#include "core/https.h"
 #include "core/ProxyVerifier.h"
 
 #include <cassert>
@@ -18,22 +18,24 @@
 #include "swoc/bwf_ip.h"
 #include "swoc/bwf_std.h"
 
-// TODO:
-// ngtcp2/nghttp3 does not have any code examples. The curl implementation might be helpful here:
-//
-// From curl/lib/quic/
-//
-//   #ifdef ENABLE_QUIC
-//   #ifdef USE_NGTCP2
-//   #include "vquic/ngtcp2.h" // <------ Use this
-//   #endif
-//   #ifdef USE_QUICHE
-//   #include "vquic/quiche.h"
-//   #endif
-//
-// Thus, use lib/vquic/ngtcp2.c:
-//
-// https://github.com/bneradt/curl/blob/72e360e7912e71c9f5d0758a627750667947cc20/lib/vquic/ngtcp2.c
+/*
+ * ngtcp2/nghttp3 does not currently have any code examples. The curl
+ * implementation was helpful in forming this code:
+ *
+ * From curl/lib/quic/:
+ *
+ *   #ifdef ENABLE_QUIC
+ *   #ifdef USE_NGTCP2
+ *   #include "vquic/ngtcp2.h" // <------ Use this
+ *   #endif
+ *   #ifdef USE_QUICHE
+ *   #include "vquic/quiche.h"
+ *   #endif
+ *
+ * Thus, use lib/vquic/ngtcp2.c:
+ *
+ * https://github.com/bneradt/curl/blob/72e360e7912e71c9f5d0758a627750667947cc20/lib/vquic/ngtcp2.c
+ */
 
 using swoc::Errata;
 using swoc::TextView;
@@ -49,9 +51,6 @@ using ClockType = std::chrono::system_clock;
 using chrono::duration_cast;
 using chrono::milliseconds;
 using chrono::nanoseconds;
-
-/** The byte used for initialization of structures. */
-constexpr auto INITIALIZATION_BYTE = 0x0;
 
 constexpr auto QUIC_MAX_STREAMS = 256 * 1024;
 constexpr auto QUIC_MAX_DATA = 1 * 1024 * 1024;
@@ -486,29 +485,32 @@ quic_set_encryption_secrets(
 }
 
 static int
-write_client_handshake(QuicSocket *qs, ngtcp2_crypto_level level, const uint8_t *data, size_t len)
+write_client_handshake(QuicSocket *qs, ngtcp2_crypto_level level, const uint8_t *data, size_t data_len)
 {
   Errata errata;
   assert(level <= QuicSocket::MAX_NGTCP2_CRYPTO_LEVEL);
-  QuicHandshake *crypto_data = &qs->crypto_data[level];
-  if (crypto_data->buf == nullptr) {
-    crypto_data->buf = static_cast<char *>(malloc(QuicHandshake::alloclen));
-    memset(static_cast<void *>(crypto_data->buf), INITIALIZATION_BYTE, sizeof(crypto_data->buf));
-    if (!crypto_data->buf) {
-      return 0;
-    }
-  }
+  QuicHandshake &crypto_data = qs->crypto_data[level];
+  auto &buf = crypto_data.buf;
 
-  assert(crypto_data->len + len <= QuicHandshake::alloclen);
+  // If the accumulated amount of data sent is greater than our reserved size
+  // for buf, then we'll be in trouble because the following insert call may
+  // result in resizing buf's std::vector memory. This will free the memory
+  // referenced via previous calls to ngtcp2_conn_submit_crypto_data, resulting
+  // in a use-after-free.
+  assert((buf.size() + data_len) <= QuicHandshake::max_handshake_size);
 
-  memcpy(&crypto_data->buf[crypto_data->len], data, len);
-  crypto_data->len += len;
+  // Get the initial pointer to the end of the current buffer, which will be
+  // the beginning of the copied data.
+  uint8_t *copied_data_start = reinterpret_cast<uint8_t *>(buf.data() + buf.size());
+
+  // Copy data into our buffer so that we will preserve it for the OpenSSL API.
+  buf.insert(buf.end(), data, data + data_len);
 
   int rv = ngtcp2_conn_submit_crypto_data(
       qs->qconn,
       level,
-      (uint8_t *)(&crypto_data->buf[crypto_data->len] - len),
-      len);
+      copied_data_start,
+      data_len);
   if (rv != 0) {
     errata.error("write_client_handshake failed");
   }
@@ -1317,23 +1319,24 @@ quic_settings(QuicSocket &qs, uint64_t stream_buffer_size)
   }
 }
 
-QuicHandshake::~QuicHandshake()
+QuicHandshake::QuicHandshake()
 {
-  if (buf != nullptr) {
-    free(buf);
-    buf = nullptr;
-  }
+  // Reserve enough space that we feel comfortable will fit the entire QUIC
+  // handshake. This buffer is potentially used across write_client_handshake
+  // calls and therefore the memory has to persist for those, and std::vector
+  // resizing will invalidate this.
+  buf.reserve(QuicHandshake::max_handshake_size);
 }
 
 QuicSocket::QuicSocket()
 {
-  memset(&dcid, INITIALIZATION_BYTE, sizeof(dcid));
-  memset(&scid, INITIALIZATION_BYTE, sizeof(scid));
-  memset(&settings, INITIALIZATION_BYTE, sizeof(settings));
-  memset(&transport_params, INITIALIZATION_BYTE, sizeof(transport_params));
-  memset(&crypto_data, INITIALIZATION_BYTE, sizeof(crypto_data));
-  memset(&local_addr, INITIALIZATION_BYTE, sizeof(local_addr));
-  memset(&h3settings, INITIALIZATION_BYTE, sizeof(h3settings));
+  memset(&dcid, 0, sizeof(dcid));
+  memset(&scid, 0, sizeof(scid));
+  memset(&settings, 0, sizeof(settings));
+  memset(&transport_params, 0, sizeof(transport_params));
+  memset(&crypto_data, 0, sizeof(crypto_data));
+  memset(&local_addr, 0, sizeof(local_addr));
+  memset(&h3settings, 0, sizeof(h3settings));
 }
 
 QuicSocket::~QuicSocket()
@@ -1995,7 +1998,7 @@ H3Session::client_session_init()
   }
 
   ngtcp2_path path;
-  memset(&path, INITIALIZATION_BYTE, sizeof(path));
+  memset(&path, 0, sizeof(path));
   ngtcp2_addr_init(
       &path.local,
       (struct sockaddr *)&_quic_socket.local_addr,
