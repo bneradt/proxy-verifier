@@ -9,7 +9,6 @@
 #include "core/https.h"
 #include "core/ProxyVerifier.h"
 
-#include <algorithm>
 #include <cassert>
 #include <fcntl.h>
 #include <ngtcp2/ngtcp2_crypto.h>
@@ -489,39 +488,29 @@ static int
 write_client_handshake(QuicSocket *qs, ngtcp2_crypto_level level, const uint8_t *data, size_t data_len)
 {
   Errata errata;
-  std::cout << "in write_client_handshake" << std::endl;
   assert(level <= QuicSocket::MAX_NGTCP2_CRYPTO_LEVEL);
   QuicHandshake *crypto_data = &qs->crypto_data[level];
   auto &buf = crypto_data->buf;
-  std::cout << "crypto_data: " << (void*)crypto_data << std::endl;
-  std::cout << "&crypto_data->buf: " << (void*)&crypto_data->buf << std::endl;
-  std::cout << "crypto_data->buf.data(): " << (void*)crypto_data->buf.data() << std::endl;
-  std::cout << "&buf: " << (void*)&buf << std::endl;
-  std::cout << "buf.data(): " << (void*)buf.data() << std::endl;
 
   // If the accumulated amount of data sent is greater than our reserved size
   // for buf, then we'll be in trouble because the following insert call may
   // result in resizing buf's std::vector memory. This will free the memory
   // referenced via previous calls to ngtcp2_conn_submit_crypto_data, resulting
   // in a use-after-free.
-  std::cout << "in write_client_handshake: checking accumulated length" << std::endl;
-  assert((crypto_data->num_bytes_stored + data_len) <= QuicHandshake::max_handshake_size);
+  assert((buf.size() + data_len) <= QuicHandshake::max_handshake_size);
 
   // Get the initial pointer to the end of the current buffer, which will be
   // the beginning of the copied data.
-  uint8_t *copied_data_start = reinterpret_cast<uint8_t *>(buf.data() + crypto_data->num_bytes_stored);
+  uint8_t *copied_data_start = reinterpret_cast<uint8_t *>(buf.data() + buf.size());
 
   // Copy data into our buffer so that we will preserve it for the OpenSSL API.
-  std::copy(data, data + data_len, buf.data() + crypto_data->num_bytes_stored);
-  crypto_data->num_bytes_stored += data_len;
+  buf.insert(buf.end(), data, data + data_len);
 
-  std::cout << "in write_client_handshake: calling ngtcp2_conn_submit_crypto_data: " << (void*)copied_data_start << std::endl;
   int rv = ngtcp2_conn_submit_crypto_data(
       qs->qconn,
       level,
       copied_data_start,
       data_len);
-  std::cout << "in write_client_handshake: done calling ngtcp2_conn_submit_crypto_data" << std::endl;
   if (rv != 0) {
     errata.error("write_client_handshake failed");
   }
@@ -1336,14 +1325,7 @@ QuicHandshake::QuicHandshake()
   // handshake. This buffer is potentially used across write_client_handshake
   // calls and therefore the memory has to persist for those, and std::vector
   // resizing will invalidate this.
-  std::cout << "QuicHandshake::QuicHandshake() this: " << (void*)this << std::endl;
-  std::cout << "QuicHandshake::QuicHandshake() &buf: " << (void*)&buf << std::endl;
-  std::cout << "QuicHandshake::QuicHandshake() buf.data(): " << (void*)buf.data() << std::endl;
-}
-
-QuicHandshake::~QuicHandshake()
-{
-  std::cout << "Destroying QuicHandshake " << std::endl;
+  buf.reserve(QuicHandshake::max_handshake_size);
 }
 
 QuicSocket::QuicSocket()
@@ -1352,7 +1334,6 @@ QuicSocket::QuicSocket()
   memset(&scid, 0, sizeof(scid));
   memset(&settings, 0, sizeof(settings));
   memset(&transport_params, 0, sizeof(transport_params));
-  memset(&crypto_data, 0, sizeof(crypto_data));
   memset(&local_addr, 0, sizeof(local_addr));
   memset(&h3settings, 0, sizeof(h3settings));
 }
@@ -1361,7 +1342,6 @@ QuicSocket::~QuicSocket()
 {
   // TODO: I think they'll be a lot of free'ing to do here. Unless we make
   // extensive use of RAII.
-  std::cout << "Freeing QuicSocket" << std::endl;
 }
 
 // static

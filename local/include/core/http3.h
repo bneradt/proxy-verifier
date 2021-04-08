@@ -58,18 +58,18 @@ BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Nghttp3Error
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 
-/** Encapsulate the buffer for the QUIC TLS hanshake. */
+/** Encapsulate the buffer for the QUIC hanshake. */
 class QuicHandshake
 {
 public:
   QuicHandshake();
-  ~QuicHandshake();
+  ~QuicHandshake() = default;
 
   QuicHandshake(QuicHandshake const &) = delete;
   QuicHandshake &operator=(QuicHandshake const &) = delete;
 
 public:
-  /** This is the maximum number of bytes we expect to use for the TLS
+  /** This is the maximum number of bytes we expect to use for the QUIC
    * handshake.
    *
    * This max value is taken from CURL code which has a comment expressing
@@ -79,8 +79,8 @@ public:
    */
   static constexpr size_t max_handshake_size = 4 * 1024;
 
-  std::array<char, max_handshake_size> buf;
-  size_t num_bytes_stored = 0;
+  /** This contains the storage for the QUIC handshake. */
+  std::vector<char> buf;
 };
 
 // TODO: this is copied from curl's ngtcp2.h. That is a c file. Refactor using
