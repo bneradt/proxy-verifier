@@ -301,7 +301,7 @@ public:
   std::unordered_map<int64_t, std::shared_ptr<H3StreamState>> _stream_map;
 
   /// The representation of the QUIC socket for this stream (connection).
-  QuicSocket _quic_socket;
+  QuicSocket quic_socket;
 
 protected:
   static swoc::Errata client_init(SSL_CTX *&client_context);

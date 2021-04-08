@@ -284,7 +284,7 @@ cb_recv_stream_data(
   (void)stream_user_data;
 
   nconsumed =
-      nghttp3_conn_read_stream(h3_session->_quic_socket.h3conn, stream_id, buf, buflen, fin);
+      nghttp3_conn_read_stream(h3_session->quic_socket.h3conn, stream_id, buf, buflen, fin);
   if (nconsumed < 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -315,7 +315,7 @@ cb_acked_stream_data_offset(
   (void)datalen;
   (void)stream_user_data;
 
-  rv = nghttp3_conn_add_ack_offset(h3_session->_quic_socket.h3conn, stream_id, datalen);
+  rv = nghttp3_conn_add_ack_offset(h3_session->quic_socket.h3conn, stream_id, datalen);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -337,7 +337,7 @@ cb_stream_close(
   (void)stream_user_data;
   /* stream is closed... */
 
-  rv = nghttp3_conn_close_stream(h3_session->_quic_socket.h3conn, stream_id, app_error_code);
+  rv = nghttp3_conn_close_stream(h3_session->quic_socket.h3conn, stream_id, app_error_code);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -390,7 +390,7 @@ cb_stream_reset(
   (void)app_error_code;
   (void)stream_user_data;
 
-  rv = nghttp3_conn_reset_stream(h3_session->_quic_socket.h3conn, stream_id);
+  rv = nghttp3_conn_reset_stream(h3_session->quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -412,7 +412,7 @@ cb_extend_max_stream_data(
   (void)max_data;
   (void)stream_user_data;
 
-  rv = nghttp3_conn_unblock_stream(h3_session->_quic_socket.h3conn, stream_id);
+  rv = nghttp3_conn_unblock_stream(h3_session->quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -452,7 +452,7 @@ quic_set_encryption_secrets(
     size_t secretlen)
 {
   auto *h3_session = (H3Session *)SSL_get_app_data(ssl);
-  auto &qs = h3_session->_quic_socket;
+  auto &qs = h3_session->quic_socket;
   auto const level = quic_from_ossl_level(ossl_level);
 
   if (ngtcp2_crypto_derive_and_install_rx_key(
@@ -523,7 +523,7 @@ static int
 quic_add_handshake_data(SSL *ssl, OSSL_ENCRYPTION_LEVEL ossl_level, const uint8_t *data, size_t len)
 {
   auto *h3_session = (H3Session *)SSL_get_app_data(ssl);
-  auto &qs = h3_session->_quic_socket;
+  auto &qs = h3_session->quic_socket;
   auto const level = quic_from_ossl_level(ossl_level);
 
   return write_client_handshake(&qs, level, data, len);
@@ -540,7 +540,7 @@ static int
 quic_send_alert(SSL *ssl, enum ssl_encryption_level_t level, uint8_t alert)
 {
   auto *h3_session = (H3Session *)SSL_get_app_data(ssl);
-  auto &qs = h3_session->_quic_socket;
+  auto &qs = h3_session->quic_socket;
   // TODO: comment these out in the parameters.
   (void)level;
 
@@ -687,9 +687,9 @@ ngtcp2_process_ingress(H3Session &session)
   ngtcp2_pkt_info pi = {0};
 
   // TODO: review our _ variable names. Public ones should not have _.
-  auto &qs = session._quic_socket;
-  ngtcp2_addr_init(&path.local, (struct sockaddr *)&qs.local_addr, qs.local_addrlen, NULL);
-  ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, NULL);
+  auto &qs = session.quic_socket;
+  ngtcp2_addr_init(&path.local, (struct sockaddr *)&qs.local_addr, qs.local_addrlen, nullptr);
+  ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, nullptr);
 
   // Process the packet.
   int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
@@ -723,7 +723,7 @@ ngtcp2_flush_egress(H3Session &session)
 
   Errata errata;
 
-  auto &qs = session._quic_socket;
+  auto &qs = session.quic_socket;
 
   switch (qs.local_addr.ss_family) {
   case AF_INET:
@@ -768,7 +768,7 @@ ngtcp2_flush_egress(H3Session &session)
     outlen = ngtcp2_conn_writev_stream(
         qs.qconn,
         &ps.path,
-        NULL,
+        nullptr,
         out,
         pktlen,
         &ndatalen,
@@ -1039,7 +1039,7 @@ cb_h3_deferred_consume(
     void *stream_user_data)
 {
   auto *h3_session = (H3Session *)conn_user_data;
-  auto &qs = h3_session->_quic_socket;
+  auto &qs = h3_session->quic_socket;
   (void)conn;
   (void)stream_user_data;
   (void)stream_id;
@@ -1207,20 +1207,20 @@ static nghttp3_callbacks nghttp3_client_callbacks = {
     cb_h3_stream_close,
     cb_h3_recv_data,
     cb_h3_deferred_consume,
-    NULL, /* begin_headers */
+    nullptr, /* begin_headers */
     cb_h3_recv_header,
     cb_h3_end_headers,
-    NULL, /* begin_trailers */
+    nullptr, /* begin_trailers */
     cb_h3_recv_header,
-    NULL, /* end_trailers */
-    NULL, /* http_begin_push_promise */
-    NULL, /* http_recv_push_promise */
-    NULL, /* http_end_push_promise */
-    NULL, /* http_cancel_push */
+    nullptr, /* end_trailers */
+    nullptr, /* http_begin_push_promise */
+    nullptr, /* http_recv_push_promise */
+    nullptr, /* http_end_push_promise */
+    nullptr, /* http_cancel_push */
     cb_h3_send_stop_sending,
-    NULL, /* push_stream */
-    NULL, /* end_stream */
-    NULL, /* reset_stream */
+    nullptr, /* push_stream */
+    nullptr, /* end_stream */
+    nullptr, /* reset_stream */
 };
 // --------------------------------------------
 // End nghttp3 callbacks.
@@ -1234,7 +1234,7 @@ initialize_nghttp3_connection(H3Session *session)
 {
   int rc = 0;
   Errata errata;
-  auto &qs = session->_quic_socket;
+  auto &qs = session->quic_socket;
   int64_t ctrl_stream_id = 0, qpack_enc_stream_id = 0, qpack_dec_stream_id = 0;
 
   auto const max_streams = ngtcp2_conn_get_max_local_streams_uni(qs.qconn);
@@ -1672,7 +1672,19 @@ H3Session::H3Session(TextView const &client_sni, int client_verify_mode)
 
 H3Session::~H3Session()
 {
-  // TODO: add nghttp3_*_del calls here.
+  _last_added_stream.reset();
+  if (quic_socket.qlogfd != -1) {
+    ::close(quic_socket.qlogfd);
+    quic_socket.qlogfd = -1;
+  }
+  if (quic_socket.ssl) {
+    SSL_free(quic_socket.ssl);
+  }
+  quic_socket.ssl = nullptr;
+  nghttp3_conn_del(quic_socket.h3conn);
+  ngtcp2_conn_del(quic_socket.qconn);
+  SSL_CTX_free(quic_socket.sslctx);
+  quic_socket.sslctx = nullptr;
 }
 
 swoc::Rv<ssize_t> H3Session::read(swoc::MemSpan<char> /* span */)
@@ -1750,7 +1762,7 @@ H3Session::write(HttpHeader const &hdr)
     new_stream_state = std::make_shared<H3StreamState>(is_client);
     stream_state = new_stream_state.get();
 
-    auto const rc = ngtcp2_conn_open_bidi_stream(_quic_socket.qconn, &stream_id, nullptr);
+    auto const rc = ngtcp2_conn_open_bidi_stream(quic_socket.qconn, &stream_id, nullptr);
     if (rc != 0) {
       zret.error(
           "Failed ngtcp2_conn_open_bidi_stream for key {}, error code: {}",
@@ -1789,14 +1801,14 @@ H3Session::write(HttpHeader const &hdr)
     stream_state->wait_for_continue = hdr._send_continue;
     if (hdr._is_response) {
       submit_result = nghttp3_conn_submit_response(
-          _quic_socket.h3conn,
+          quic_socket.h3conn,
           stream_id,
           nva,
           num_headers,
           &data_reader);
     } else {
       submit_result = nghttp3_conn_submit_request(
-          _quic_socket.h3conn,
+          quic_socket.h3conn,
           stream_id,
           nva,
           num_headers,
@@ -1806,10 +1818,10 @@ H3Session::write(HttpHeader const &hdr)
   } else { // Empty body.
     if (hdr._is_response) {
       submit_result =
-          nghttp3_conn_submit_response(_quic_socket.h3conn, stream_id, nva, num_headers, nullptr);
+          nghttp3_conn_submit_response(quic_socket.h3conn, stream_id, nva, num_headers, nullptr);
     } else {
       submit_result = nghttp3_conn_submit_request(
-          _quic_socket.h3conn,
+          quic_socket.h3conn,
           stream_id,
           nva,
           num_headers,
@@ -1923,23 +1935,23 @@ quic_ssl_ctx()
 int
 H3Session::quic_init_ssl(std::string const &hostname)
 {
-  const uint8_t *alpn = NULL;
+  const uint8_t *alpn = nullptr;
   size_t alpnlen = 0;
 
-  assert(_quic_socket.ssl == nullptr);
-  _quic_socket.ssl = SSL_new(_quic_socket.sslctx);
+  assert(quic_socket.ssl == nullptr);
+  quic_socket.ssl = SSL_new(quic_socket.sslctx);
 
-  SSL_set_app_data(_quic_socket.ssl, this);
-  SSL_set_connect_state(_quic_socket.ssl);
+  SSL_set_app_data(quic_socket.ssl, this);
+  SSL_set_connect_state(quic_socket.ssl);
 
   alpn = (const uint8_t *)NGHTTP3_ALPN_H3;
   alpnlen = sizeof(NGHTTP3_ALPN_H3) - 1;
   if (alpn) {
-    SSL_set_alpn_protos(_quic_socket.ssl, alpn, (int)alpnlen);
+    SSL_set_alpn_protos(quic_socket.ssl, alpn, (int)alpnlen);
   }
 
   /* set SNI */
-  SSL_set_tlsext_host_name(_quic_socket.ssl, hostname.c_str());
+  SSL_set_tlsext_host_name(quic_socket.ssl, hostname.c_str());
   return 0;
 }
 
@@ -1955,9 +1967,9 @@ Errata
 H3Session::client_session_init()
 {
   Errata errata;
-  _quic_socket.version = NGTCP2_PROTO_VER_MAX;
+  quic_socket.version = NGTCP2_PROTO_VER_MAX;
 
-  _quic_socket.sslctx = quic_ssl_ctx();
+  quic_socket.sslctx = quic_ssl_ctx();
   quic_init_ssl(_client_sni);
 
   if (_client_verify_mode != SSL_VERIFY_NONE) {
@@ -1965,31 +1977,31 @@ H3Session::client_session_init()
         R"(Setting client H3 verification mode against the proxy to: {}.)",
         _client_verify_mode);
     SSL_set_verify(
-        _quic_socket.ssl,
+        quic_socket.ssl,
         _client_verify_mode,
         nullptr /* No verify_callback is passed */);
   }
 
-  _quic_socket.dcid.datalen = NGTCP2_MAX_CIDLEN;
-  QuicSocket::randomly_populate_array(_quic_socket.dcid.data, _quic_socket.dcid.datalen);
+  quic_socket.dcid.datalen = NGTCP2_MAX_CIDLEN;
+  QuicSocket::randomly_populate_array(quic_socket.dcid.data, quic_socket.dcid.datalen);
 
-  _quic_socket.scid.datalen = NGTCP2_MAX_CIDLEN;
-  QuicSocket::randomly_populate_array(_quic_socket.scid.data, _quic_socket.scid.datalen);
+  quic_socket.scid.datalen = NGTCP2_MAX_CIDLEN;
+  QuicSocket::randomly_populate_array(quic_socket.scid.data, quic_socket.scid.datalen);
 
   // TODO Consider quic logging
-  //(void)Curl_qlogdir(data, _quic_socket.scid.data, NGTCP2_MAX_CIDLEN, &qfd);
-  //_quic_socket.qlogfd = qfd; /* -1 if failure above */
-  _quic_socket.qlogfd = -1; // Using -1 to disable quic logging.
+  //(void)Curl_qlogdir(data, quic_socket.scid.data, NGTCP2_MAX_CIDLEN, &qfd);
+  //quic_socket.qlogfd = qfd; /* -1 if failure above */
+  quic_socket.qlogfd = -1; // Using -1 to disable quic logging.
 
   // TODO: CURL seems to pass CURLOPT_BUFFERSIZE for this, if I'm reading the
   // code right. That defaults to 16 kB.
-  quic_settings(_quic_socket, MAX_DRAIN_BUFFER_SIZE);
+  quic_settings(quic_socket, MAX_DRAIN_BUFFER_SIZE);
 
-  _quic_socket.local_addrlen = sizeof(_quic_socket.local_addr);
+  quic_socket.local_addrlen = sizeof(quic_socket.local_addr);
   auto const rv = getsockname(
       this->get_fd(),
-      (struct sockaddr *)&_quic_socket.local_addr,
-      &_quic_socket.local_addrlen);
+      (struct sockaddr *)&quic_socket.local_addr,
+      &quic_socket.local_addrlen);
   if (rv == -1) {
     errata.error("getsockname failed: {}", Errno{});
     return errata;
@@ -1999,20 +2011,20 @@ H3Session::client_session_init()
   memset(&path, 0, sizeof(path));
   ngtcp2_addr_init(
       &path.local,
-      (struct sockaddr *)&_quic_socket.local_addr,
-      _quic_socket.local_addrlen,
+      (struct sockaddr *)&quic_socket.local_addr,
+      quic_socket.local_addrlen,
       nullptr);
   ngtcp2_addr_init(&path.remote, &this->_endpoint->sa, this->_endpoint->size(), nullptr);
 
   auto const rc = ngtcp2_conn_client_new(
-      &_quic_socket.qconn,
-      &_quic_socket.dcid,
-      &_quic_socket.scid,
+      &quic_socket.qconn,
+      &quic_socket.dcid,
+      &quic_socket.scid,
       &path,
       NGTCP2_PROTO_VER_MIN,
       &client_ngtcp2_callbacks,
-      &_quic_socket.settings,
-      &_quic_socket.transport_params,
+      &quic_socket.settings,
+      &quic_socket.transport_params,
       nullptr,
       this /* The user_data in the ngtcp2 callbacks. */);
   if (rc != 0) {
@@ -2020,7 +2032,7 @@ H3Session::client_session_init()
     return errata;
   }
 
-  ngtcp2_conn_set_tls_native_handle(_quic_socket.qconn, _quic_socket.ssl);
+  ngtcp2_conn_set_tls_native_handle(quic_socket.qconn, quic_socket.ssl);
 
   // Commence handshake.
   if (ngtcp2_flush_egress(*this) < 0) {
@@ -2030,10 +2042,10 @@ H3Session::client_session_init()
 
   // Now that we went our first packet, exchange packets until the handshake is
   // complete.
-  bool handshake_completed = ngtcp2_conn_get_handshake_completed(_quic_socket.qconn);
+  bool handshake_completed = ngtcp2_conn_get_handshake_completed(quic_socket.qconn);
   while (!handshake_completed) {
     nghttp3_data_recv(*this);
-    handshake_completed = ngtcp2_conn_get_handshake_completed(_quic_socket.qconn);
+    handshake_completed = ngtcp2_conn_get_handshake_completed(quic_socket.qconn);
   }
   if (!handshake_completed) {
     errata.error("Timed out waiting for handshake to complete.");
