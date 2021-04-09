@@ -47,7 +47,7 @@ using namespace std::literals;
 using std::this_thread::sleep_for;
 
 namespace chrono = std::chrono;
-using ClockType = std::chrono::system_clock;
+using ClockType = chrono::system_clock;
 using chrono::duration_cast;
 using chrono::milliseconds;
 using chrono::nanoseconds;
@@ -217,9 +217,9 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Nghttp3Error const &error)
 
 /** Receive data off of the socket.
  *
- * @return True on success, false on failure.
+ * @return -1 on failure, otherwise the number of bytes received.
  */
-static bool ngtcp2_process_ingress(H3Session &session);
+static int ngtcp2_process_ingress(H3Session &session);
 
 /** Send data on the socket.
  *
@@ -274,11 +274,10 @@ cb_recv_stream_data(
     void *conn_data,
     void * /* stream_user_data */)
 {
-  H3Session *h3_session = (H3Session *)conn_data;
-  ssize_t nconsumed;
+  H3Session *h3_session = reinterpret_cast<H3Session *>(conn_data);
   int fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) ? 1 : 0;
 
-  nconsumed =
+  ssize_t nconsumed =
       nghttp3_conn_read_stream(h3_session->quic_socket.h3conn, stream_id, buf, buflen, fin);
   if (nconsumed < 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -302,7 +301,7 @@ cb_acked_stream_data_offset(
     void *conn_data,
     void * /* stream_user_data */)
 {
-  H3Session *h3_session = (H3Session *)conn_data;
+  H3Session *h3_session = reinterpret_cast<H3Session *>(conn_data);
   int rv = nghttp3_conn_add_ack_offset(h3_session->quic_socket.h3conn, stream_id, datalen);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -319,11 +318,9 @@ cb_stream_close(
     void *conn_data,
     void * /* stream_user_data */)
 {
-  H3Session *h3_session = (H3Session *)conn_data;
-  int rv;
-  /* stream is closed... */
+  H3Session *h3_session = reinterpret_cast<H3Session *>(conn_data);
 
-  rv = nghttp3_conn_close_stream(h3_session->quic_socket.h3conn, stream_id, app_error_code);
+  int rv = nghttp3_conn_close_stream(h3_session->quic_socket.h3conn, stream_id, app_error_code);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -348,9 +345,7 @@ cb_get_new_connection_id(
 {
   QuicSocket::randomly_populate_array(cid->data, cidlen);
   cid->datalen = cidlen;
-
   QuicSocket::randomly_populate_array(token, NGTCP2_STATELESS_RESET_TOKENLEN);
-
   return 0;
 }
 
@@ -363,7 +358,7 @@ cb_stream_reset(
     void *conn_data,
     void * /* stream_user_data */)
 {
-  H3Session *h3_session = (H3Session *)conn_data;
+  H3Session *h3_session = reinterpret_cast<H3Session *>(conn_data);
   int rv = nghttp3_conn_reset_stream(h3_session->quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -380,7 +375,7 @@ cb_extend_max_stream_data(
     void *conn_data,
     void * /* stream_user_data */)
 {
-  H3Session *h3_session = (H3Session *)conn_data;
+  H3Session *h3_session = reinterpret_cast<H3Session *>(conn_data);
   int rv = nghttp3_conn_unblock_stream(h3_session->quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -420,7 +415,7 @@ quic_set_encryption_secrets(
     const uint8_t *tx_secret,
     size_t secretlen)
 {
-  auto *h3_session = (H3Session *)SSL_get_app_data(ssl);
+  auto *h3_session = reinterpret_cast<H3Session *>(SSL_get_app_data(ssl));
   auto &qs = h3_session->quic_socket;
   auto const level = quic_from_ossl_level(ossl_level);
 
@@ -482,16 +477,15 @@ write_client_handshake(
   int rv = ngtcp2_conn_submit_crypto_data(qs->qconn, level, copied_data_start, data_len);
   if (rv != 0) {
     errata.error("write_client_handshake failed");
+    return 0;
   }
-  assert(0 == rv);
-
   return 1;
 }
 
 static int
 quic_add_handshake_data(SSL *ssl, OSSL_ENCRYPTION_LEVEL ossl_level, const uint8_t *data, size_t len)
 {
-  auto *h3_session = (H3Session *)SSL_get_app_data(ssl);
+  auto *h3_session = reinterpret_cast<H3Session *>(SSL_get_app_data(ssl));
   auto &qs = h3_session->quic_socket;
   auto const level = quic_from_ossl_level(ossl_level);
 
@@ -508,7 +502,7 @@ quic_flush_flight(SSL * /* ssl */)
 static int
 quic_send_alert(SSL *ssl, enum ssl_encryption_level_t /* level */, uint8_t alert)
 {
-  auto *h3_session = (H3Session *)SSL_get_app_data(ssl);
+  auto *h3_session = reinterpret_cast<H3Session *>(SSL_get_app_data(ssl));
   auto &qs = h3_session->quic_socket;
   qs.tls_alert = alert;
   return 1;
@@ -596,29 +590,29 @@ static ngtcp2_callbacks server_ngtcp2_callbacks = {
 // End ngtcp2 callbacks.
 // --------------------------------------------
 
-static bool
+static int
 ngtcp2_process_ingress(H3Session &session)
 {
   uint8_t buf[65536];
   size_t bufsize = sizeof(buf);
   struct sockaddr_storage remote_addr;
   socklen_t remote_addrlen = sizeof(remote_addr);
-  ssize_t recvd = 0;
+  ssize_t num_bytes_received = 0;
   Errata errata;
 
   for (;;) {
-    recvd = recvfrom(
+    num_bytes_received = recvfrom(
         session.get_fd(),
         (char *)buf,
         bufsize,
         0,
         (struct sockaddr *)&remote_addr,
         &remote_addrlen);
-    if (recvd > 0) {
+    if (num_bytes_received > 0) {
       // Success. We read data off the socket.
       break;
     }
-    if (recvd == -1) {
+    if (num_bytes_received == -1) {
       if (errno == EINTR) {
         continue;
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -628,22 +622,22 @@ ngtcp2_process_ingress(H3Session &session)
           errata.note(std::move(poll_errata));
           errata.error("Failed to poll for HTTP/3 data.");
           session.close();
-          return false;
+          return -1;
         } else if (poll_return > 0) {
           // Simply repeat the read now that poll says something is ready.
         } else if (poll_return == 0) {
           errata.error("Poll timed out waiting to read HTTP/3 content.");
           session.close();
-          return false;
+          return -1;
         } else if (poll_return < 0) {
           // Connection was closed. Nothing to do.
           errata.diag("The peer closed the HTTP/3 connection while reading during poll.");
-          return true;
+          return 0;
         }
         continue;
       } else {
         errata.error("ngtcp2_process_ingress: unexpected recvfrom() errno: {}", Errno{});
-        return false;
+        return -1;
       }
     }
   }
@@ -658,39 +652,24 @@ ngtcp2_process_ingress(H3Session &session)
   ngtcp2_addr_init(&path.remote, (struct sockaddr *)&remote_addr, remote_addrlen, nullptr);
 
   // Process the packet.
-  int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, recvd, ts);
+  int rv = ngtcp2_conn_read_pkt(qs.qconn, &path, &pi, buf, num_bytes_received, ts);
   if (rv != 0) {
-    // TODO Send CONNECTION_CLOSE?
     errata.error(
         "ngtcp2_process_ingress: ngtcp2_conn_read_pkt() had an error return: {}",
         Ngtcp2Error{rv});
-    return false;
+    return -1;
   }
-  return true;
+  return num_bytes_received;
 }
 
 static int
 ngtcp2_flush_egress(H3Session &session)
 {
-  int rv;
-  ssize_t outlen;
-  uint8_t out[NGTCP2_MAX_PKTLEN_IPV4];
-  size_t pktlen;
-  ngtcp2_path_storage ps;
-  ngtcp2_tstamp ts = timestamp();
-  struct sockaddr_storage remote_addr;
-  int64_t stream_id;
-  ssize_t veccnt;
-  int fin;
-  nghttp3_vec vec[16];
-  ssize_t ndatalen;
-  uint32_t flags;
-  int num_bytes_sent = 0;
-
   Errata errata;
-
+  int num_bytes_sent = 0;
   auto &qs = session.quic_socket;
 
+  size_t pktlen = 0;
   switch (qs.local_addr.ss_family) {
   case AF_INET:
     pktlen = NGTCP2_MAX_PKTLEN_IPV4;
@@ -704,18 +683,21 @@ ngtcp2_flush_egress(H3Session &session)
     assert(0);
   }
 
-  rv = ngtcp2_conn_handle_expiry(qs.qconn, ts);
+  ngtcp2_tstamp ts = timestamp();
+  int rv = ngtcp2_conn_handle_expiry(qs.qconn, ts);
   if (rv != 0) {
     errata.error("ngtcp2_conn_handle_expiry returned error: {}", Ngtcp2Error{rv});
     return -1;
   }
 
+  ngtcp2_path_storage ps;
   ngtcp2_path_storage_zero(&ps);
 
   for (;;) {
-    veccnt = 0;
-    stream_id = -1;
-    fin = 0;
+    ssize_t veccnt = 0;
+    int64_t stream_id = -1;
+    int fin = 0;
+    nghttp3_vec vec[16];
 
     if (qs.h3conn && ngtcp2_conn_get_max_data_left(qs.qconn)) {
       veccnt = nghttp3_conn_writev_stream(
@@ -730,8 +712,10 @@ ngtcp2_flush_egress(H3Session &session)
       }
     }
 
-    flags = NGTCP2_WRITE_STREAM_FLAG_MORE | (fin ? NGTCP2_WRITE_STREAM_FLAG_FIN : 0);
-    outlen = ngtcp2_conn_writev_stream(
+    uint32_t flags = NGTCP2_WRITE_STREAM_FLAG_MORE | (fin ? NGTCP2_WRITE_STREAM_FLAG_FIN : 0);
+    uint8_t out[NGTCP2_MAX_PKTLEN_IPV4];
+    ssize_t ndatalen = 0;
+    ssize_t outlen = ngtcp2_conn_writev_stream(
         qs.qconn,
         &ps.path,
         nullptr,
@@ -777,7 +761,6 @@ ngtcp2_flush_egress(H3Session &session)
       }
     }
 
-    memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
     ssize_t sent = 0;
     while ((sent = send(session.get_fd(), (const char *)out, outlen, 0)) == -1) {
       if (errno == EINTR) {
@@ -809,14 +792,21 @@ ngtcp2_flush_egress(H3Session &session)
   return num_bytes_sent;
 }
 
-// TODO:
-// In curl, this is ngh3_stream_recv and is called via Curl_read.
+/** Listen on the Session's socket for incoming data and then respond with any
+ * resulting packets.
+ *
+ * Listening on the socket will poll() until data comes in or a timeout is
+ * experienced. Writing any packets will not delay if there is nothing to write.
+ */
 static bool
 nghttp3_data_recv(H3Session &session)
 {
-  if (!ngtcp2_process_ingress(session)) {
+  // This may poll until packets come in to read.
+  if (ngtcp2_process_ingress(session) < 0) {
     return false;
   }
+
+  // Write packets that came in from ngtcp2_process_ingress, if there are any.
   if (ngtcp2_flush_egress(session) < 0) {
     return false;
   }
@@ -891,7 +881,7 @@ cb_h3_stream_close(
   auto &stream_state = *reinterpret_cast<H3StreamState *>(stream_user_data);
   auto const &message_start = stream_state.stream_start;
   auto const message_end = ClockType::now();
-  auto const elapsed_ms = duration_cast<chrono::milliseconds>(message_end - message_start);
+  auto const elapsed_ms = duration_cast<milliseconds>(message_end - message_start);
   if (elapsed_ms > Transaction_Delay_Cutoff) {
     errata.error(
         R"(HTTP/3 transaction in stream id {} with key {} took {}.)",
@@ -917,9 +907,8 @@ cb_h3_recv_data(
     void * /* conn_user_data */,
     void *stream_user_data)
 {
-  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
-
   Errata errata;
+  auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
   errata.diag(
       "Drained HTTP/3 body for transaction with key: {}, stream id: {} "
       "of {} bytes with content: {}",
@@ -1001,9 +990,9 @@ cb_h3_end_headers(
     void * conn_user_data,
     void *stream_user_data)
 {
+  Errata errata;
   auto *session_data = reinterpret_cast<H3Session *>(conn_user_data);
   auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
-  Errata errata;
   assert(stream_state->will_receive_request || stream_state->will_receive_response);
   if (stream_state->will_receive_request) {
     auto &request_from_client = *stream_state->request_from_client;
@@ -1116,10 +1105,11 @@ constexpr int FAILED = 1;
 static int
 initialize_nghttp3_connection(H3Session *session)
 {
-  int rc = 0;
   Errata errata;
   auto &qs = session->quic_socket;
-  int64_t ctrl_stream_id = 0, qpack_enc_stream_id = 0, qpack_dec_stream_id = 0;
+  int64_t ctrl_stream_id = 0;
+  int64_t qpack_enc_stream_id = 0;
+  int64_t qpack_dec_stream_id = 0;
 
   auto const max_streams = ngtcp2_conn_get_max_local_streams_uni(qs.qconn);
   if (max_streams < 3) {
@@ -1129,7 +1119,7 @@ initialize_nghttp3_connection(H3Session *session)
 
   nghttp3_settings_default(&qs.h3settings);
 
-  rc = nghttp3_conn_client_new(
+  int rc = nghttp3_conn_client_new(
       &qs.h3conn,
       &nghttp3_client_callbacks,
       &qs.h3settings,
@@ -1219,12 +1209,6 @@ QuicSocket::QuicSocket()
   memset(&h3settings, 0, sizeof(h3settings));
 }
 
-QuicSocket::~QuicSocket()
-{
-  // TODO: I think they'll be a lot of free'ing to do here. Unless we make
-  // extensive use of RAII.
-}
-
 // static
 void
 QuicSocket::randomly_populate_array(uint8_t *array, size_t array_len)
@@ -1292,7 +1276,7 @@ H3Session::do_connect(swoc::IPEndpoint const *target)
 }
 
 swoc::Rv<int>
-H3Session::poll_for_headers(chrono::milliseconds timeout)
+H3Session::poll_for_headers(milliseconds timeout)
 {
   if (this->get_a_stream_has_ended()) {
     return 1;
@@ -1369,7 +1353,7 @@ H3Session::drain_body(
     size_t /* expected_content_size */,
     TextView /* initial */)
 {
-  // For HTTP/2, we process entire streams once they are ended. Therefore there
+  // For HTTP/3, we process entire streams once they are ended. Therefore there
   // is never body to drain.
   return {0};
 }
@@ -1734,8 +1718,6 @@ H3Session::write(HttpHeader const &hdr)
   if (ngtcp2_flush_egress(*this) < 0) {
     zret.error("Failure calling ngtcp2_flush_egress while writing headers.");
   }
-  // TODO: free'ing here is what curl does, but don't we have to read on the
-  // socket and send on the socket?
   free(nva);
   return zret;
 }

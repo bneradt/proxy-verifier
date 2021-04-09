@@ -91,7 +91,9 @@ class QuicSocket
 {
 public:
   QuicSocket();
-  ~QuicSocket();
+
+  // Socket cleanup is handled in H3Session.
+  ~QuicSocket() = default;
 
   QuicSocket(QuicSocket const &) = delete;
   QuicSocket &operator=(QuicSocket const &) = delete;
