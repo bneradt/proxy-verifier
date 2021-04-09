@@ -243,14 +243,11 @@ static int
 cb_recv_crypto_data(
     ngtcp2_conn *tconn,
     ngtcp2_crypto_level crypto_level,
-    uint64_t offset,
+    uint64_t /* offset */,
     const uint8_t *data,
     size_t datalen,
-    void *user_data)
+    void * /* user_data */)
 {
-  (void)offset;
-  (void)user_data;
-
   if (ngtcp2_crypto_read_write_crypto_data(tconn, crypto_level, data, datalen) != 0) {
     return NGTCP2_ERR_CRYPTO;
   }
@@ -259,10 +256,10 @@ cb_recv_crypto_data(
 }
 
 static int
-cb_handshake_completed(ngtcp2_conn *tconn, void *user_data)
+cb_handshake_completed(ngtcp2_conn * /* tconn */, void * /* user_data */)
 {
-  (void)user_data;
-  (void)tconn;
+  Errata errata;
+  errata.diag(R"(h3 is negotiated.)");
   return 0;
 }
 
@@ -271,17 +268,15 @@ cb_recv_stream_data(
     ngtcp2_conn *tconn,
     uint32_t flags,
     int64_t stream_id,
-    uint64_t offset,
+    uint64_t /* offset */,
     const uint8_t *buf,
     size_t buflen,
     void *conn_data,
-    void *stream_user_data)
+    void * /* stream_user_data */)
 {
   H3Session *h3_session = (H3Session *)conn_data;
   ssize_t nconsumed;
   int fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) ? 1 : 0;
-  (void)offset;
-  (void)stream_user_data;
 
   nconsumed =
       nghttp3_conn_read_stream(h3_session->quic_socket.h3conn, stream_id, buf, buflen, fin);
@@ -300,22 +295,15 @@ cb_recv_stream_data(
 
 static int
 cb_acked_stream_data_offset(
-    ngtcp2_conn *tconn,
+    ngtcp2_conn * /* tconn */,
     int64_t stream_id,
-    uint64_t offset,
+    uint64_t /* offset */,
     uint64_t datalen,
     void *conn_data,
-    void *stream_user_data)
+    void * /* stream_user_data */)
 {
   H3Session *h3_session = (H3Session *)conn_data;
-  int rv;
-  (void)stream_id;
-  (void)tconn;
-  (void)offset;
-  (void)datalen;
-  (void)stream_user_data;
-
-  rv = nghttp3_conn_add_ack_offset(h3_session->quic_socket.h3conn, stream_id, datalen);
+  int rv = nghttp3_conn_add_ack_offset(h3_session->quic_socket.h3conn, stream_id, datalen);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -325,16 +313,14 @@ cb_acked_stream_data_offset(
 
 static int
 cb_stream_close(
-    ngtcp2_conn *tconn,
+    ngtcp2_conn * /* tconn */,
     int64_t stream_id,
     uint64_t app_error_code,
     void *conn_data,
-    void *stream_user_data)
+    void * /* stream_user_data */)
 {
   H3Session *h3_session = (H3Session *)conn_data;
   int rv;
-  (void)tconn;
-  (void)stream_user_data;
   /* stream is closed... */
 
   rv = nghttp3_conn_close_stream(h3_session->quic_socket.h3conn, stream_id, app_error_code);
@@ -346,26 +332,20 @@ cb_stream_close(
 }
 
 static int
-cb_extend_max_local_streams_bidi(ngtcp2_conn *tconn, uint64_t max_streams, void *user_data)
+cb_extend_max_local_streams_bidi(ngtcp2_conn * /* tconn */, uint64_t /* max_streams */, void * /* user_data */)
 {
-  (void)tconn;
-  (void)max_streams;
-  (void)user_data;
-
+  // TODO: consider removing these unused functions.
   return 0;
 }
 
 static int
 cb_get_new_connection_id(
-    ngtcp2_conn *tconn,
+    ngtcp2_conn * /* tconn */,
     ngtcp2_cid *cid,
     uint8_t *token,
     size_t cidlen,
-    void *user_data)
+    void * /* user_data */)
 {
-  (void)tconn;
-  (void)user_data;
-
   QuicSocket::randomly_populate_array(cid->data, cidlen);
   cid->datalen = cidlen;
 
@@ -376,21 +356,15 @@ cb_get_new_connection_id(
 
 static int
 cb_stream_reset(
-    ngtcp2_conn *tconn,
+    ngtcp2_conn * /* tconn */,
     int64_t stream_id,
-    uint64_t final_size,
-    uint64_t app_error_code,
+    uint64_t /* final_size */,
+    uint64_t /* app_error_code */,
     void *conn_data,
-    void *stream_user_data)
+    void * /* stream_user_data */)
 {
   H3Session *h3_session = (H3Session *)conn_data;
-  int rv;
-  (void)tconn;
-  (void)final_size;
-  (void)app_error_code;
-  (void)stream_user_data;
-
-  rv = nghttp3_conn_reset_stream(h3_session->quic_socket.h3conn, stream_id);
+  int rv = nghttp3_conn_reset_stream(h3_session->quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -400,19 +374,14 @@ cb_stream_reset(
 
 static int
 cb_extend_max_stream_data(
-    ngtcp2_conn *tconn,
+    ngtcp2_conn * /* tconn */,
     int64_t stream_id,
-    uint64_t max_data,
+    uint64_t /* max_data */,
     void *conn_data,
-    void *stream_user_data)
+    void * /* stream_user_data */)
 {
   H3Session *h3_session = (H3Session *)conn_data;
-  int rv;
-  (void)tconn;
-  (void)max_data;
-  (void)stream_user_data;
-
-  rv = nghttp3_conn_unblock_stream(h3_session->quic_socket.h3conn, stream_id);
+  int rv = nghttp3_conn_unblock_stream(h3_session->quic_socket.h3conn, stream_id);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -530,20 +499,17 @@ quic_add_handshake_data(SSL *ssl, OSSL_ENCRYPTION_LEVEL ossl_level, const uint8_
 }
 
 static int
-quic_flush_flight(SSL *ssl)
+quic_flush_flight(SSL * /* ssl */)
 {
-  (void)ssl;
+  // TODO: remove?
   return 1;
 }
 
 static int
-quic_send_alert(SSL *ssl, enum ssl_encryption_level_t level, uint8_t alert)
+quic_send_alert(SSL *ssl, enum ssl_encryption_level_t /* level */, uint8_t alert)
 {
   auto *h3_session = (H3Session *)SSL_get_app_data(ssl);
   auto &qs = h3_session->quic_socket;
-  // TODO: comment these out in the parameters.
-  (void)level;
-
   qs.tls_alert = alert;
   return 1;
 }
@@ -857,56 +823,6 @@ nghttp3_data_recv(H3Session &session)
   return true;
 }
 
-#if 0
-// TODO
-// This function should not be needed because it is replaced by
-// H3Session::write(HttpHeader). Just keeping it here in case I get confused
-// later about this so I can see this note. Remove it after HTTP/3 development
-// is done.
-static bool ngh3_stream_send(
-    H3StreamState &stream
-    const void *mem,
-    size_t len)
-{
-  ssize_t sent;
-  struct connectdata *conn = data->conn;
-  struct quicsocket *qs = conn->quic;
-  curl_socket_t sockfd = conn->sock[sockindex];
-  struct HTTP *stream = data->req.p.http;
-
-  if(!stream->h3req) {
-    CURLcode result = http_request(data, mem, len);
-    if(result) {
-      *curlcode = CURLE_SEND_ERROR;
-      return -1;
-    }
-    sent = len;
-  }
-  else {
-    H3BUGF(infof(data, "ngh3_stream_send() wants to send %zd bytes\n",
-                 len));
-    if(!stream->upload_len) {
-      stream->upload_mem = mem;
-      stream->upload_len = len;
-      (void)nghttp3_conn_resume_stream(qs->h3conn, stream->stream3_id);
-      sent = len;
-    }
-    else {
-      *curlcode = CURLE_AGAIN;
-      return -1;
-    }
-  }
-
-  if(ngtcp2_flush_egress(sockfd, qs)) {
-    *curlcode = CURLE_SEND_ERROR;
-    return -1;
-  }
-
-  *curlcode = CURLE_OK;
-  return sent;
-}
-#endif
-
 // --------------------------------------------
 // Begin nghttp3 callbacks.
 // --------------------------------------------
@@ -917,19 +833,14 @@ static bool ngh3_stream_send(
  */
 static ssize_t
 cb_h3_readfunction(
-    nghttp3_conn *conn,
-    int64_t stream_id,
+    nghttp3_conn * /* conn */,
+    int64_t /* stream_id */,
     nghttp3_vec *vec,
-    size_t veccnt,
+    size_t /* veccnt */,
     uint32_t *pflags,
-    void *conn_data,
+    void * /* conn_data */,
     void *stream_user_data)
 {
-  (void)conn;
-  (void)stream_id;
-  (void)conn_data;
-  (void)veccnt;
-
   Errata errata;
   auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
 
@@ -948,32 +859,24 @@ cb_h3_readfunction(
 /* this amount of data has now been acked on this stream */
 static int
 cb_h3_acked_stream_data(
-    nghttp3_conn *conn,
-    int64_t stream_id,
-    size_t datalen,
-    void *conn_user_data,
-    void *stream_user_data)
+    nghttp3_conn * /* conn */,
+    int64_t /* stream_id */,
+    size_t /* datalen */,
+    void * /* conn_user_data */,
+    void * /* stream_user_data */)
 {
-  (void)conn;
-  (void)stream_id;
-  (void)datalen;
-  (void)conn_user_data;
-  (void)stream_user_data;
-
+  // TODO: remove this?
   return 0;
 }
 
 static int
 cb_h3_stream_close(
-    nghttp3_conn *conn,
+    nghttp3_conn * /* conn */,
     int64_t stream_id,
-    uint64_t app_error_code,
+    uint64_t /* app_error_code */,
     void *conn_user_data,
     void *stream_user_data)
 {
-  (void)conn;
-  (void)app_error_code;
-
   Errata errata;
   errata.diag("HTTP/3 stream is closed with id: {}", stream_id);
 
@@ -1007,15 +910,13 @@ cb_h3_stream_close(
 
 static int
 cb_h3_recv_data(
-    nghttp3_conn *conn,
+    nghttp3_conn * /* conn */,
     int64_t stream_id,
     const uint8_t *buf,
     size_t buflen,
-    void *conn_user_data,
+    void * /* conn_user_data */,
     void *stream_user_data)
 {
-  (void)conn;
-  (void)conn_user_data;
   auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
 
   Errata errata;
@@ -1026,23 +927,19 @@ cb_h3_recv_data(
       stream_id,
       buflen,
       TextView(reinterpret_cast<char const *>(buf), buflen));
-
   return 0;
 }
 
 static int
 cb_h3_deferred_consume(
-    nghttp3_conn *conn,
+    nghttp3_conn * /* conn */,
     int64_t stream_id,
     size_t consumed,
     void *conn_user_data,
-    void *stream_user_data)
+    void * /* stream_user_data */)
 {
-  auto *h3_session = (H3Session *)conn_user_data;
+  auto *h3_session = reinterpret_cast<H3Session *>(conn_user_data);
   auto &qs = h3_session->quic_socket;
-  (void)conn;
-  (void)stream_user_data;
-  (void)stream_id;
 
   ngtcp2_conn_extend_max_stream_offset(qs.qconn, stream_id, consumed);
   ngtcp2_conn_extend_max_offset(qs.qconn, consumed);
@@ -1051,21 +948,15 @@ cb_h3_deferred_consume(
 
 static int
 cb_h3_recv_header(
-    nghttp3_conn *conn,
-    int64_t stream_id,
-    int32_t token,
+    nghttp3_conn * /* conn */,
+    int64_t /* stream_id */,
+    int32_t /* token */,
     nghttp3_rcbuf *name,
     nghttp3_rcbuf *value,
-    uint8_t flags,
-    void *conn_user_data,
+    uint8_t /* flags */,
+    void * /* conn_user_data */,
     void *stream_user_data)
 {
-  (void)conn;
-  (void)stream_id;
-  (void)token;
-  (void)flags;
-  (void)conn_user_data;
-
   auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
   stream_state->have_received_headers = true;
 
@@ -1105,14 +996,11 @@ cb_h3_recv_header(
 
 static int
 cb_h3_end_headers(
-    nghttp3_conn *conn,
+    nghttp3_conn * /* conn */,
     int64_t stream_id,
-    void *conn_user_data,
+    void * conn_user_data,
     void *stream_user_data)
 {
-  (void)conn;
-  (void)conn_user_data;
-
   auto *session_data = reinterpret_cast<H3Session *>(conn_user_data);
   auto *stream_state = reinterpret_cast<H3StreamState *>(stream_user_data);
   Errata errata;
@@ -1188,17 +1076,13 @@ cb_h3_end_headers(
 
 static int
 cb_h3_send_stop_sending(
-    nghttp3_conn *conn,
-    int64_t stream_id,
-    uint64_t app_error_code,
-    void *conn_user_data,
-    void *stream_user_data)
+    nghttp3_conn * /* conn */,
+    int64_t /* stream_id */,
+    uint64_t /* app_error_code */,
+    void * /* conn_user_data */,
+    void * /* stream_user_data */)
 {
-  (void)conn;
-  (void)stream_id;
-  (void)app_error_code;
-  (void)conn_user_data;
-  (void)stream_user_data;
+  // TODO: remove?
   return 0;
 }
 
