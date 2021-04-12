@@ -785,7 +785,7 @@ do_listen(swoc::IPEndpoint &server_addr, bool do_https, bool do_http3)
         if (bind_result == 0) {
           int listen_result = listen(socket_fd, 16384);
           if (listen_result == 0) {
-            errata.info(R"(Listening at {} for protocol {})", server_addr, protocol_description);
+            errata.info(R"(Listening for {} at: {})", protocol_description, server_addr);
             auto runner = std::make_unique<std::thread>(TF_Accept, socket_fd, do_https, do_http3);
             Accept_Threads.push_back(std::move(runner));
           } else {

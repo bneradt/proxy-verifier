@@ -1031,7 +1031,7 @@ cb_h3_end_headers(
     composed_url.append(request_from_client._path);
     request_from_client.parse_url(composed_url);
     errata.diag(
-        "Received an HTTP/2 request for key {} with stream id {}:\n{}",
+        "Received an HTTP/3 request for key {} with stream id {}:\n{}",
         stream_state->key,
         stream_id,
         request_from_client);
@@ -1044,7 +1044,7 @@ cb_h3_end_headers(
       // do not. Emit a warning for now.
       stream_state->key = response_from_wire.get_key();
       errata.error(
-          "Incoming HTTP/2 response has no key set from the request. Using key from "
+          "Incoming HTTP/3 response has no key set from the request. Using key from "
           "response: {}.",
           stream_state->key);
     } else {
@@ -1058,14 +1058,14 @@ cb_h3_end_headers(
       response_from_wire.set_key(stream_state->key);
     }
     errata.diag(
-        "Received an HTTP/2 response for key {} with stream id {}:\n{}",
+        "Received an HTTP/3 response for key {} with stream id {}:\n{}",
         stream_state->key,
         stream_id,
         response_from_wire);
     auto const &key = stream_state->key;
     auto const &specified_response = stream_state->specified_response;
     if (response_from_wire.verify_headers(key, *specified_response->_fields_rules)) {
-      errata.error(R"(HTTP/2 response headers did not match expected response headers.)");
+      errata.error(R"(HTTP/3 response headers did not match expected response headers.)");
       session_data->set_non_zero_exit_status();
     }
     if (specified_response->_status != 0 &&
@@ -1074,7 +1074,7 @@ cb_h3_end_headers(
         (response_from_wire._status != 304 || specified_response->_status != 200))
     {
       errata.error(
-          R"(HTTP/2 Status Violation: expected {} got {}, key={}.)",
+          R"(HTTP/3 Status Violation: expected {} got {}, key={}.)",
           specified_response->_status,
           response_from_wire._status,
           key);
@@ -1459,7 +1459,7 @@ H3Session::run_transactions(
     if (this->is_closed()) {
       txn_errata.note(this->do_connect(target));
       if (!txn_errata.is_ok()) {
-        txn_errata.error(R"(Failed to reconnect HTTP/2 key={}.)", key);
+        txn_errata.error(R"(Failed to reconnect HTTP/3 key={}.)", key);
         // If we don't have a valid connection, there's no point in continuing.
         break;
       }
@@ -1496,7 +1496,7 @@ H3Session::run_transactions(
     }
     txn_errata.note(this->run_transaction(transaction));
     if (!txn_errata.is_ok()) {
-      txn_errata.error(R"(Failed HTTP/2 transaction with key={}.)", key);
+      txn_errata.error(R"(Failed HTTP/3 transaction with key={}.)", key);
     }
     errata.note(std::move(txn_errata));
   }
@@ -1736,7 +1736,7 @@ H3Session::write(HttpHeader const &hdr)
           stream_id,
           submit_result);
     } else {
-      zret.diag("Sent the following HTTP/2 headers for stream id {}:\n{}", stream_id, hdr);
+      zret.diag("Sent the following HTTP/3 headers for stream id {}:\n{}", stream_id, hdr);
     }
   }
 

@@ -16,7 +16,8 @@ from ports import get_port
 def _configure_client(obj, process, name, replay_dir, find_ports=True, use_ipv6=False,
                       configure_http=True, configure_https=True, configure_http3=True,
                       http_ports=None, https_ports=None, http3_ports=None,
-                      ssl_cert='', ca_certs='', verbose=True, other_args=''):
+                      ssl_cert='', ca_certs='', verbose=True, single_threaded=True,
+                      other_args=''):
     """
     Configure the process for running the verifier-client.
 
@@ -109,6 +110,9 @@ def _configure_client(obj, process, name, replay_dir, find_ports=True, use_ipv6=
     if verbose:
         command += "--verbose diag "
 
+    if single_threaded:
+        command += "--thread-limit 1"
+
     if other_args:
         command += " {}".format(other_args)
 
@@ -119,7 +123,8 @@ def _configure_client(obj, process, name, replay_dir, find_ports=True, use_ipv6=
 def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
                       configure_http=True, configure_https=True, configure_http3=True,
                       http_ports=None, https_ports=None, http3_ports=None,
-                      ssl_cert='', ca_certs='', verbose=True, other_args=''):
+                      ssl_cert='', ca_certs='', verbose=True, single_threaded=True,
+                      other_args=''):
     """
     Create a verifier-client process.
 
@@ -169,6 +174,9 @@ def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
 
         verbose: (bool) Whether to enable debug-level logging.
 
+        single_threaded: (bool) Whether the client should run in a single thread
+            rather than running the sessions in parallel.
+
         other_args: (str) Any other arbitrary options to pass to verifier-client.
 
     Returns:
@@ -191,6 +199,7 @@ def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
         ssl_cert,
         ca_certs,
         verbose,
+        single_threaded,
         other_args)
     return client
 
@@ -198,7 +207,8 @@ def MakeClientProcess(test, name, replay_dir, find_ports=True, use_ipv6=False,
 def AddClientProcess(run, name, replay_dir, find_ports=True, use_ipv6=False,
                      configure_http=True, configure_https=True, configure_http3=True,
                      http_ports=None, https_ports=None, http3_ports=None,
-                     ssl_cert='', ca_certs='', verbose=True, other_args=''):
+                     ssl_cert='', ca_certs='', verbose=True, single_threaded=True,
+                     other_args=''):
     """
     Set the Default process of the test run to a verifier-client Process.
 
@@ -229,6 +239,7 @@ def AddClientProcess(run, name, replay_dir, find_ports=True, use_ipv6=False,
         ssl_cert,
         ca_certs,
         verbose,
+        single_threaded,
         other_args)
     return p
 

@@ -21,7 +21,9 @@ proxy = r.AddProxyProcess("proxy1", listen_port=client.Variables.http3_port,
                           server_port=server.Variables.http_port,
                           use_ssl=True, use_http3_to_1=True)
 
-# TODO Add gold files, probably.
+proxy.Streams.stdout = "gold/http3_to_http1_proxy.gold"
+client.Streams.stdout = "gold/http3_to_http1_client.gold"
+server.Streams.stdout = "gold/http3_to_http1_server.gold"
 
 client.Streams.stdout += Testers.ExcludesExpression(
     "Violation:",
@@ -30,3 +32,4 @@ client.Streams.stdout += Testers.ExcludesExpression(
 server.Streams.stdout += Testers.ExcludesExpression(
     "Violation:",
     "There should be no verification errors because there are none added.")
+

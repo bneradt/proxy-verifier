@@ -528,7 +528,7 @@ Run_Session(Ssn const &ssn, TargetSelector &target_selector)
       errata.error("Could not replay an HTTP/3 session because no HTTP/3 ports are provided.");
     } else {
       session = std::make_unique<H3Session>(ssn._client_sni, ssn._client_verify_mode);
-      errata.diag("Connecting via HTTP/3 over TLS.");
+      errata.diag("Connecting via HTTP/3 over QUIC.");
     }
   } else if (ssn.is_h2) {
     real_target = target_selector.get_https_target();
