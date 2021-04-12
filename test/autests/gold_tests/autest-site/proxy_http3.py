@@ -137,6 +137,8 @@ class HttpRequestHandler:
                     replay_server, timeout=self.timeout)
             connection_to_server = self.local_thread.http_conns[origin]
             http1_headers = self.convert_headers_to_http1(request_headers)
+            if req_body:
+                http1_headers.add_header('Content-Length', str(len(req_body)))
             connection_to_server.request(method, path, req_body, http1_headers)
             res = connection_to_server.getresponse()
 

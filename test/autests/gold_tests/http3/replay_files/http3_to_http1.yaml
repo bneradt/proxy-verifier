@@ -11,13 +11,6 @@ sessions:
 
   transactions:
 
-  #
-  # Do these without a content-length to make sure we handle that correctly.
-  # Content-Length should not be required.
-  #
-  # Also, make sure the user can use pseudo header fields rather than the
-  # method, scheme, url nodes.
-  #
   - all:
       headers:
         fields:
@@ -70,6 +63,7 @@ sessions:
         - [ X-Response-Header, response ]
         - [ X-Deleted-Header2, this_will_be_deleted ]
         - [ X-Proxy-Directive, "Delete=%<x-deleted-header2%> Insert=%<x-added-header: 1%>" ]
+        - [ Content-Length, 32 ]
       content:
         encoding: plain
         size: 32
