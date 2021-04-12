@@ -12,7 +12,7 @@
 - "uuid": "1"
 
 ``
-- "Host": "127.0.0.1:2004"
+- "Host": "127.0.0.1:``"
 - "Accept-Encoding": "identity"
 - "x-request-header": "request"
 - "uuid": "1"
@@ -28,7 +28,7 @@
 ``
 ``Drained with headers body of 10240 bytes with content: 0000000 `` 00004ff 
 ``
-- "Host": "127.0.0.1:2004"
+- "Host": "127.0.0.1:``"
 - "Accept-Encoding": "identity"
 - "uuid": "2"
 - "x-request-header": "request2"
@@ -41,7 +41,7 @@
 - "content-length": "16"
 
 ``
-- "Host": "127.0.0.1:2004"
+- "Host": "127.0.0.1:``"
 - "Accept-Encoding": "identity"
 - "uuid": "3"
 - "x-request-header": "request3"
@@ -54,7 +54,7 @@
 - "content-length": "50"
 
 ``
-- "Host": "127.0.0.1:2004"
+- "Host": "127.0.0.1:``"
 - "Accept-Encoding": "identity"
 - "uuid": "4"
 - "x-request-header": "request3"
