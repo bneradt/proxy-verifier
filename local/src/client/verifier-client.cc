@@ -615,7 +615,7 @@ Engine::command_run()
   auto server_addr_http3_arg{arguments.get("connect-http3")};
   if (!server_addr_http_arg && !server_addr_https_arg && !server_addr_http3_arg) {
     errata.error(
-        R"(Must provide one of "--connect-http", "--connect-https", or "--connect-http3" arguments")");
+        R"(Must provide at least one of "--connect-http", "--connect-https", or "--connect-http3" arguments")");
     process_exit_code = 1;
     return;
   }

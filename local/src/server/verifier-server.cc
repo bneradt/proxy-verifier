@@ -873,10 +873,6 @@ Engine::command_run()
         process_exit_code = 1;
         return;
       }
-      if (errata.is_ok()) {
-        errata.note(TLSSession::init());
-        errata.note(H2Session::init(&process_exit_code));
-      }
     }
 
     if (server_addr_http3_arg) {
@@ -914,6 +910,10 @@ Engine::command_run()
           process_exit_code = 1;
           return;
         }
+      }
+      if (errata.is_ok()) {
+        errata.note(TLSSession::init());
+        errata.note(H2Session::init(&process_exit_code));
       }
     }
 
