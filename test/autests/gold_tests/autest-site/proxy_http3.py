@@ -65,6 +65,7 @@ class QuicDirectoryLogger(QuicLogger):
 
 class HttpRequestHandler:
     timeout = 5
+
     def __init__(
         self,
         *,
@@ -150,19 +151,55 @@ class HttpRequestHandler:
             traceback.print_exc(file=sys.stdout)
             raise e
 
-        setattr(res, 'headers', ProxyRequestHandler.filter_headers(res.headers))
+        try:
+            setattr(res, 'headers', ProxyRequestHandler.filter_headers(res.headers))
 
-        for k, v in res.headers.items():
-            response_headers += ((k, v),)
-        self.print_info(
-            request_headers,
-            req_body,
-            response_headers,
-            response_body,
-            res.status,
-            res.reason)
+            response_headers = [
+                (':status'.encode(), str(res.status).encode()),
+            ]
+            for k, v in res.headers.items():
+                response_headers += ((k.encode(), v.encode()),)
+            self.print_info(
+                request_headers,
+                req_body,
+                response_headers,
+                response_body,
+                res.status,
+                res.reason)
+
+        except Exception as e:
+            print("Curating the HTTP/1 response to proxy to HTTP/3 failed.")
+            traceback.print_exc(file=sys.stdout)
+            raise e
         return response_headers, response_body
 
+    def print_info(self, request_headers, req_body, response_headers, res_body,
+                   response_status, response_reason):
+        def parse_qsl(s):
+            return '\n'.join(
+                "%-20s %s" %
+                (k, v) for k, v in urllib.parse.parse_qsl(
+                    s, keep_blank_values=True))
+
+        print("==== REQUEST HEADERS ====")
+        for k, v in request_headers.items():
+            print("{}: {}".format(k, v))
+
+        if req_body is not None:
+            print("\n==== REQUEST BODY ====\n%s" % req_body)
+
+        print("\n==== RESPONSE ====")
+        status_line = "%d %s" % (response_status, response_reason)
+        print(status_line)
+
+        print("\n==== RESPONSE HEADERS ====")
+        for k, v in response_headers:
+            if isinstance(k, bytes):
+                k, v = (k.decode('ascii'), v.decode('ascii'))
+            print("{}: {}".format(k, v))
+
+        if res_body is not None:
+            print("\n==== RESPONSE BODY ====\n%s\n" % res_body)
 
     def http_event_received(self, event: H3Event) -> None:
         print("HttpRequestHandler: handling HTTP event")
@@ -182,31 +219,32 @@ class HttpRequestHandler:
         self.transmit()
 
     async def send_response(self) -> None:
-        print("Awaiting on client_request_done_event")
-        await self.client_request_done_event.wait()
 
-        print("Awaiting on server response")
+        await self.client_request_done_event.wait()
         if self.is_h3_to_server:
             raise RuntimeError(
                 "Unexpectedly received HTTP/3 to origin configuration.")
         else:
-            print("Calling _send_http1_request_to_server")
             self.response_headers, self.response_body = self._send_http1_request_to_server(
                 self.request_headers, self.request_body, self.stream_id)
-            print("Done calling _send_http1_request_to_server")
 
-        self.connection.send_headers(
-            stream_id=self.stream_id,
-            headers=self.response_headers,
-            end_stream=not self.response_body
-        )
-        if self.response_body:
-            self.connection.send_data(
+        try:
+            self.connection.send_headers(
                 stream_id=self.stream_id,
-                data=self.response_body,
-                end_stream=True
+                headers=self.response_headers,
+                end_stream=not self.response_body
             )
-        self.transmit()
+            if self.response_body:
+                self.connection.send_data(
+                    stream_id=self.stream_id,
+                    data=self.response_body,
+                    end_stream=True
+                )
+            self.transmit()
+        except Exception as e:
+            print("Transmitting the HTTP/3 response to the client failed.")
+            traceback.print_exc(file=sys.stdout)
+            raise e
 
 
 class HttpQuicServerHandler(QuicConnectionProtocol):
@@ -216,8 +254,6 @@ class HttpQuicServerHandler(QuicConnectionProtocol):
         self._http: Optional[HttpConnection] = None
 
     def http_event_received(self, event: H3Event) -> None:
-        print("HttpQuicServerHandler: receiving an http event")
-        print(event)
         if isinstance(event, HeadersReceived) and event.stream_id not in self._handlers:
             authority = None
             headers = []
@@ -318,7 +354,13 @@ class SessionTicketStore:
         return self.tickets.pop(label, None)
 
 
-def configure_http3_server(listen_port, server_port, https_pem, ca_pem, listening_sentinel, h3_to_server=False):
+def configure_http3_server(
+        listen_port,
+        server_port,
+        https_pem,
+        ca_pem,
+        listening_sentinel,
+        h3_to_server=False):
 
     HttpQuicServerHandler.cert_file = https_pem
     HttpQuicServerHandler.ca_file = ca_pem
@@ -347,8 +389,8 @@ def configure_http3_server(listen_port, server_port, https_pem, ca_pem, listenin
     loop = asyncio.get_event_loop()
     server_side_proto = "HTTP/3" if h3_to_server else "HTTP/1"
     print(
-            f"Serving HTTP/3 Proxy on 127.0.0.1:{listen_port} with pem '{https_pem}', "
-            f"forwarding to 127.0.0.1:{server_port} over {server_side_proto}")
+        f"Serving HTTP/3 Proxy on 127.0.0.1:{listen_port} with pem '{https_pem}', "
+        f"forwarding to 127.0.0.1:{server_port} over {server_side_proto}")
     loop.run_until_complete(
         serve(
             '0.0.0.0',

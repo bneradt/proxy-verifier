@@ -329,7 +329,10 @@ cb_stream_close(
 }
 
 static int
-cb_extend_max_local_streams_bidi(ngtcp2_conn * /* tconn */, uint64_t /* max_streams */, void * /* user_data */)
+cb_extend_max_local_streams_bidi(
+    ngtcp2_conn * /* tconn */,
+    uint64_t /* max_streams */,
+    void * /* user_data */)
 {
   // TODO: consider removing these unused functions.
   return 0;
@@ -1008,7 +1011,7 @@ static int
 cb_h3_end_headers(
     nghttp3_conn * /* conn */,
     int64_t stream_id,
-    void * conn_user_data,
+    void *conn_user_data,
     void *stream_user_data)
 {
   Errata errata;
@@ -1884,7 +1887,7 @@ H3Session::client_session_init()
 
   // TODO Consider quic logging
   //(void)Curl_qlogdir(data, quic_socket.scid.data, NGTCP2_MAX_CIDLEN, &qfd);
-  //quic_socket.qlogfd = qfd; /* -1 if failure above */
+  // quic_socket.qlogfd = qfd; /* -1 if failure above */
   quic_socket.qlogfd = -1; // Using -1 to disable quic logging.
 
   // TODO: CURL seems to pass CURLOPT_BUFFERSIZE for this, if I'm reading the

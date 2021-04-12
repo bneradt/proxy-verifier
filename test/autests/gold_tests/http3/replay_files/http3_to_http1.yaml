@@ -39,31 +39,33 @@ sessions:
         data: 0123456789
 
     proxy-request:
-      # HTTP/3 on the server-side.
+      # HTTP/1 on the server-side.
       protocol:
       - name: http
-        version: 3
+        version: 1
       - name: tls
         sni: test_sni
       - name: tcp
       - name: ip
 
       headers:
+        url:
+        - [ scheme, { value: http, as: equal } ]
+        - [ host, { value: example.data.com, as: equal } ]
+        - [ path, { value: /a/path, as: equal } ]
+
         fields:
-        - [ :method, { value: POST, as: equal } ]
-        - [ :scheme, { value: https, as: equal } ]
-        - [ :authority, { value: example.data.com, as: equal } ]
-        - [ :path, /a/path ]
-        - [ X-Request-Header, { as: present } ]
-        - [ X-Added-Header, { as: present } ]
+        - [ X-Request-Header, { value: request, as: equal } ]
+        - [ X-Added-Header, { value: 1, as: equal } ]
         - [ X-Deleted-Header, { as: absent } ]
-        - [ Content-Length, { as: absent } ]
+        - [ Content-Length, { value: 10, as: equal } ]
 
     server-response:
+      status: 200
+      reason: OK
       headers:
         encoding: esc_json
         fields:
-        - [ :status, 500 ]
         - [ X-Equal-Header, some_content ]
         - [ X-Response-Header, response ]
         - [ X-Deleted-Header2, this_will_be_deleted ]
@@ -73,11 +75,11 @@ sessions:
         size: 32
 
     proxy-response:
+      status: 200
       headers:
         encoding: esc_json
         fields:
-        - [ :status, { value: 500, as: equal } ]
         - [ X-Equal-Header, { value: some_content, as: equal } ]
-        - [ X-Response-Header, { as: present } ]
+        - [ X-Response-Header, { value: response, as: equal } ]
         - [ X-Deleted-Header2, { as: absent } ]
-        - [ Content-Length, { as: absent } ]
+        - [ Content-Length, { value: 32, as: equal } ]
