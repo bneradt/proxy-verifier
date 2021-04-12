@@ -18,8 +18,8 @@ r = Test.AddTestRun("Verify HTTP/3")
 client = r.AddClientProcess("client1", "replay_files/http3.yaml")
 server = r.AddServerProcess("server1", "replay_files/http3.yaml")
 proxy = r.AddProxyProcess("proxy1", listen_port=client.Variables.http3_port,
-                          server_port=server.Variables.http3_port,
-                          use_ssl=True, use_http3=True)
+                          server_port=server.Variables.http_port,
+                          use_ssl=True, use_http3_to_1=True)
 
 # TODO Add gold files, probably.
 

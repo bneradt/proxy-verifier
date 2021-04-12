@@ -9,6 +9,7 @@ Implement HTTP/3 proxy behavior in Python.
 import argparse
 import asyncio
 import importlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -16,6 +17,13 @@ import time
 from collections import deque
 from email.utils import formatdate
 from typing import Callable, Deque, Dict, List, Optional, Union, cast
+
+from proxy_http1 import ProxyRequestHandler
+
+# For HTTP/1 to origin.
+from email.message import EmailMessage as HttpHeaders
+import http.client
+import threading
 
 import aioquic
 from aioquic.asyncio import QuicConnectionProtocol, serve
@@ -56,6 +64,7 @@ class QuicDirectoryLogger(QuicLogger):
 
 
 class HttpRequestHandler:
+    timeout = 5
     def __init__(
         self,
         *,
@@ -66,6 +75,8 @@ class HttpRequestHandler:
         stream_ended: bool,
         stream_id: int,
         transmit: Callable[[], None],
+        is_h3_to_server: bool,
+        server_port: int,
     ) -> None:
         self.authority = authority
         self.connection = connection
@@ -74,46 +85,115 @@ class HttpRequestHandler:
         self.scope = scope
         self.stream_id = stream_id
         self.transmit = transmit
+        self.is_h3_to_server = is_h3_to_server
+        self.server_port = server_port
 
-        self.request_done_event: asyncio.Event = asyncio.Event()
+        self.client_request_done_event: asyncio.Event = asyncio.Event()
         self.request_headers: Headers = None
         self.request_body = b''
 
         self.response_headers: Headers
         self.response_body = b""
 
+        self.local_thread = threading.local()
+        self.local_thread.http_conns = {}
+
         if stream_ended:
             self.queue.put_nowait({"type": "http.request"})
+
+    @staticmethod
+    def convert_headers_to_http1(headers):
+        """
+        Remove the ':...' headers.
+        """
+        new_headers = http.client.HTTPMessage()
+        for key, value in headers.items():
+            if key[0] == ':':
+                continue
+            new_headers.add_header(key, value)
+        return new_headers
+
+    # TODO: Gah...this should be asynchronous. Punting on that for now. It will
+    # currently block.
+    def _send_http1_request_to_server(self, request_headers, req_body, stream_id):
+        if not isinstance(request_headers, HttpHeaders):
+            request_headers_message = HttpHeaders()
+            for name, value in request_headers:
+                request_headers_message.add_header(name.decode(), value.decode())
+            request_headers = request_headers_message
+        request_headers = ProxyRequestHandler.filter_headers(request_headers)
+
+        # For all of these, for convenience, we simply talk HTTP (not HTTPS).
+        scheme = 'http'
+        replay_server = "127.0.0.1:{}".format(self.server_port)
+        method = request_headers[':method']
+        path = request_headers[':path']
+
+        try:
+            origin = (scheme, replay_server)
+            if origin not in self.local_thread.http_conns:
+                self.local_thread.http_conns[origin] = http.client.HTTPConnection(
+                    replay_server, timeout=self.timeout)
+            connection_to_server = self.local_thread.http_conns[origin]
+            http1_headers = self.convert_headers_to_http1(request_headers)
+            connection_to_server.request(method, path, req_body, http1_headers)
+            res = connection_to_server.getresponse()
+
+            version_table = {10: 'HTTP/1.0', 11: 'HTTP/1.1'}
+            setattr(res, 'headers', res.msg)
+            setattr(res, 'response_version', version_table[res.version])
+
+            response_body = res.read()
+        except Exception as e:
+            print("Connection to '{}' initiated with request to '{}://{}{}' failed: {}".format(
+                replay_server, scheme, request_headers.get(':authority', ''), path, e))
+            traceback.print_exc(file=sys.stdout)
+            raise e
+
+        setattr(res, 'headers', ProxyRequestHandler.filter_headers(res.headers))
+
+        for k, v in res.headers.items():
+            response_headers += ((k, v),)
+        self.print_info(
+            request_headers,
+            req_body,
+            response_headers,
+            response_body,
+            res.status,
+            res.reason)
+        return response_headers, response_body
+
 
     def http_event_received(self, event: H3Event) -> None:
         print("HttpRequestHandler: handling HTTP event")
         if isinstance(event, DataReceived):
             self.request_body += event.data
             if event.stream_ended:
-                print("Setting request_done_event")
-                self.request_done_event.set()
+                print("Setting client_request_done_event")
+                self.client_request_done_event.set()
         elif isinstance(event, HeadersReceived):
             if self.request_headers is not None:
                 self.request_headers.append(event.headers)
             else:
                 self.request_headers = event.headers
             if event.stream_ended:
-                print("Setting request_done_event")
-                self.request_done_event.set()
+                print("Setting client_request_done_event")
+                self.client_request_done_event.set()
         self.transmit()
 
     async def send_response(self) -> None:
-        print("Awaiting on request_done_event")
-        await self.request_done_event.wait()
-        print("request_done_event set!!!")
+        print("Awaiting on client_request_done_event")
+        await self.client_request_done_event.wait()
 
-        # TODO: These will be propulated from the server's response eventually.
-        print("Sending a response (supposedly).")
-        self.response_headers = [
-            (b':status', b'200'),
-            (b'x-response-header', b'1')]
-        self.response_body = b'Some great body'
-        # End TODO
+        print("Awaiting on server response")
+        if self.is_h3_to_server:
+            raise RuntimeError(
+                "Unexpectedly received HTTP/3 to origin configuration.")
+        else:
+            print("Calling _send_http1_request_to_server")
+            self.response_headers, self.response_body = self._send_http1_request_to_server(
+                self.request_headers, self.request_body, self.stream_id)
+            print("Done calling _send_http1_request_to_server")
 
         self.connection.send_headers(
             stream_id=self.stream_id,
@@ -194,6 +274,8 @@ class HttpQuicServerHandler(QuicConnectionProtocol):
                 stream_ended=event.stream_ended,
                 stream_id=event.stream_id,
                 transmit=self.transmit,
+                is_h3_to_server=self.h3_to_server,
+                server_port=self.server_port,
             )
             self._handlers[event.stream_id] = handler
             handler.http_event_received(event)
@@ -236,10 +318,12 @@ class SessionTicketStore:
         return self.tickets.pop(label, None)
 
 
-def configure_http3_server(listen_port, server_port, https_pem, ca_pem, listening_sentinel):
+def configure_http3_server(listen_port, server_port, https_pem, ca_pem, listening_sentinel, h3_to_server=False):
 
     HttpQuicServerHandler.cert_file = https_pem
     HttpQuicServerHandler.ca_file = ca_pem
+    HttpQuicServerHandler.h3_to_server = h3_to_server
+    HttpQuicServerHandler.server_port = server_port
 
     try:
         os.mkdir('quic_log_directory')
@@ -261,8 +345,10 @@ def configure_http3_server(listen_port, server_port, https_pem, ca_pem, listenin
     # TODO
     # In 3.7: how about asyncio.run(serve(...))
     loop = asyncio.get_event_loop()
-    print("Serving HTTP/3 Proxy on {}:{} with pem '{}', forwarding to {}:{}".format(
-        "127.0.0.1", listen_port, https_pem, "127.0.0.1", server_port))
+    server_side_proto = "HTTP/3" if h3_to_server else "HTTP/1"
+    print(
+            f"Serving HTTP/3 Proxy on 127.0.0.1:{listen_port} with pem '{https_pem}', "
+            f"forwarding to 127.0.0.1:{server_port} over {server_side_proto}")
     loop.run_until_complete(
         serve(
             '0.0.0.0',

@@ -37,8 +37,8 @@ def parse_args():
                              help='Listen for HTTP/2 connections but talk HTTP/1 to the server.')
     proto_group.add_argument('--http2_to_2', action="store_true",
                              help='Listen for HTTP/2 connections and talk HTTP/2 to the server.')
-    proto_group.add_argument('--http3', action="store_true",
-                             help='Listen for HTTP/3 connections and talk HTTP/3 to the server.')
+    proto_group.add_argument('--http3_to_1', action="store_true",
+                             help='Listen for HTTP/3 connections and talk HTTP/1 to the server.')
 
     args = parser.parse_args()
 
@@ -67,7 +67,7 @@ def main():
                 args.https_pem,
                 args.ca_pem,
                 h2_to_server=True)
-        elif args.http3:
+        elif args.http3_to_1:
             # TODO: why is the ca and the server cert both https.pem? That
             # seems to be the needed thing to do.
             proxy_http3.configure_http3_server(
@@ -75,7 +75,8 @@ def main():
                 args.server_port,
                 args.https_pem,
                 args.https_pem,
-                args.listening_http3_sentinel)
+                args.listening_http3_sentinel,
+                h3_to_server=False)
         else:
             proxy_http1.configure_http1_server(
                 proxy_http1.ProxyRequestHandler, proxy_http1.ThreadingHTTPServer,

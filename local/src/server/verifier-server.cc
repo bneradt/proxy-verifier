@@ -766,6 +766,14 @@ do_listen(swoc::IPEndpoint &server_addr, bool do_https, bool do_http3)
 {
   swoc::Errata errata;
   int socket_fd = socket(server_addr.family(), SOCK_STREAM, 0);
+  std::string protocol_description;
+  if (do_http3) {
+    protocol_description = "HTTP/3";
+  } else if (do_https) {
+    protocol_description = "HTTPS (HTTP/2 or HTTP/1.x)";
+  } else {
+    protocol_description = "HTTP/1.x";
+  }
   if (socket_fd >= 0) {
     // Be agressive in reusing the port
     static constexpr int ONE = 1;
@@ -777,7 +785,7 @@ do_listen(swoc::IPEndpoint &server_addr, bool do_https, bool do_http3)
         if (bind_result == 0) {
           int listen_result = listen(socket_fd, 16384);
           if (listen_result == 0) {
-            errata.info(R"(Listening at {})", server_addr);
+            errata.info(R"(Listening at {} for protocol {})", server_addr, protocol_description);
             auto runner = std::make_unique<std::thread>(TF_Accept, socket_fd, do_https, do_http3);
             Accept_Threads.push_back(std::move(runner));
           } else {

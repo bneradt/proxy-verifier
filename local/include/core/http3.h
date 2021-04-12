@@ -327,7 +327,7 @@ private:
   nghttp3_nv tv_to_nv(char const *name, swoc::TextView v);
   swoc::Errata connect_udp_socket(swoc::IPEndpoint const *target);
   int quic_init_ssl(std::string const &hostname);
-  void receive_responses();
+  swoc::Errata receive_responses();
 
 private:
   std::deque<int64_t> _ended_streams;
