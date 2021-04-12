@@ -77,3 +77,57 @@ sessions:
         - [ X-Response-Header, { value: response, as: equal } ]
         - [ X-Deleted-Header2, { as: absent } ]
         - [ Content-Length, { value: 32, as: equal } ]
+
+  - client-request:
+      headers:
+        encoding: esc_json
+        fields:
+        - [ :method, GET ]
+        - [ :scheme, https ]
+        - [ :authority, example.data.com ]
+        - [ :path, /a/new/path ]
+        - [ uuid, 2 ]
+        - [ X-Request-Header, request2 ]
+      content:
+        encoding: plain
+        size: 10240
+
+    proxy-request:
+      # HTTP/1 on the server-side.
+      protocol:
+      - name: http
+        version: 1
+      - name: tls
+        sni: test_sni
+      - name: tcp
+      - name: ip
+
+      headers:
+        url:
+        - [ scheme, { value: http, as: equal } ]
+        - [ host, { value: example.data.com, as: equal } ]
+        - [ path, { value: /a/new/path, as: equal } ]
+
+        fields:
+        - [ X-Request-Header, { value: request2, as: equal } ]
+        - [ Content-Length, { value: 9, as: equal } ]
+
+    server-response:
+      status: 404
+      reason: Not Found
+      headers:
+        encoding: esc_json
+        fields:
+        - [ X-Response-Header, response2 ]
+        - [ Content-Length, 10240 ]
+      content:
+        encoding: plain
+        size: 10240
+
+    proxy-response:
+      status: 404
+      headers:
+        encoding: esc_json
+        fields:
+        - [ X-Response-Header, { value: response2, as: equal } ]
+        - [ Content-Length, { value: 10240, as: equal } ]

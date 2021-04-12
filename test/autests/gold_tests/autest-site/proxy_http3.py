@@ -170,7 +170,7 @@ class HttpRequestHandler:
                 res.reason)
 
         except Exception as e:
-            print("Curating the HTTP/1 response to proxy to HTTP/3 failed.")
+            print("Curating the HTTP/1 response to proxy to HTTP/3 failed: {}".format(e))
             traceback.print_exc(file=sys.stdout)
             raise e
         return response_headers, response_body
@@ -204,11 +204,9 @@ class HttpRequestHandler:
             print("\n==== RESPONSE BODY ====\n%s\n" % res_body)
 
     def http_event_received(self, event: H3Event) -> None:
-        print("HttpRequestHandler: handling HTTP event")
         if isinstance(event, DataReceived):
             self.request_body += event.data
             if event.stream_ended:
-                print("Setting client_request_done_event")
                 self.client_request_done_event.set()
         elif isinstance(event, HeadersReceived):
             if self.request_headers is not None:
@@ -216,7 +214,6 @@ class HttpRequestHandler:
             else:
                 self.request_headers = event.headers
             if event.stream_ended:
-                print("Setting client_request_done_event")
                 self.client_request_done_event.set()
         self.transmit()
 
@@ -244,7 +241,7 @@ class HttpRequestHandler:
                 )
             self.transmit()
         except Exception as e:
-            print("Transmitting the HTTP/3 response to the client failed.")
+            print("Transmitting the HTTP/3 response to the client failed: {}".format(e))
             traceback.print_exc(file=sys.stdout)
             raise e
 
