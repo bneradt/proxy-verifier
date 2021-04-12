@@ -116,10 +116,10 @@ def _configure_server(obj, process, name, replay_dir, find_ports=True, use_ipv6=
 
     # Do not try to run PortOpen on the HTTP/3 (QUIC) socket because UDP is a
     # connectionless protocol.
-    if https_ports:
-        process.Ready = When.PortOpen(https_ports[0])
-    elif http_ports:
+    if http_ports:
         process.Ready = When.PortOpen(http_ports[0])
+    elif https_ports:
+        process.Ready = When.PortOpen(https_ports[0])
     # Tests that expect a failure due to verification issues will need
     # to set this to 1.
     process.ReturnCode = 0
