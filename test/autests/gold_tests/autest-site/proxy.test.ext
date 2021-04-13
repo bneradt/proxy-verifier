@@ -10,6 +10,7 @@ Implement Proxy Verifier test proxy logic
 from __future__ import print_function
 import os
 
+sentinel_counter = 0
 
 def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
                      use_ssl=False, https_pem=None, ca_pem=None, use_http2_to_1=False,
@@ -24,6 +25,8 @@ def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
 
         For all other arguments, see MakeProxyProcess
     """
+
+    global sentinel_counter
 
     use_protocol_list = [use_http2_to_1, use_http2_to_2, use_http3_to_1]
     if use_protocol_list.count(True) > 1:
@@ -76,7 +79,8 @@ def _configure_proxy(obj, process, name, listen_port=8080, server_port=8081,
         command += " --http2_to_2"
 
     if use_http3_to_1:
-        listening_http3_sentinel = 'quic_socket_is_ready'
+        listening_http3_sentinel = f'quic_socket_is_ready_{sentinel_counter}'
+        sentinel_counter += 1
         command += f" --http3_to_1 --listening-http3-sentinel {listening_http3_sentinel}"
 
     process.Setup.Copy(proxy_src, proxy_dest, CopyLogic.SoftFiles)
