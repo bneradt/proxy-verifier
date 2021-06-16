@@ -512,31 +512,31 @@ static SSL_QUIC_METHOD ssl_quic_method =
 static ngtcp2_callbacks client_ngtcp2_callbacks = {
     ngtcp2_crypto_client_initial_cb,
     nullptr, /* recv_client_initial */
-    cb_recv_crypto_data,
-    cb_handshake_completed,
+    ::cb_recv_crypto_data,
+    ::cb_handshake_completed,
     nullptr, /* recv_version_negotiation */
     ngtcp2_crypto_encrypt_cb,
     ngtcp2_crypto_decrypt_cb,
     ngtcp2_crypto_hp_mask_cb,
-    cb_recv_stream_data,
+    ::cb_recv_stream_data,
     nullptr, /* acked_crypto_offset */
-    cb_acked_stream_data_offset,
+    ::cb_acked_stream_data_offset,
     nullptr, /* stream_open */
-    cb_stream_close,
+    ::cb_stream_close,
     nullptr, /* recv_stateless_reset */
     ngtcp2_crypto_recv_retry_cb,
     nullptr,
     nullptr, /* extend_max_local_streams_uni */
     nullptr, /* rand  */
-    cb_get_new_connection_id,
+    ::cb_get_new_connection_id,
     nullptr,                     /* remove_connection_id */
     ngtcp2_crypto_update_key_cb, /* update_key */
     nullptr,                     /* path_validation */
     nullptr,                     /* select_preferred_addr */
-    cb_stream_reset,
+    ::cb_stream_reset,
     nullptr, /* extend_max_remote_streams_bidi */
     nullptr, /* extend_max_remote_streams_uni */
-    cb_extend_max_stream_data,
+    ::cb_extend_max_stream_data,
     nullptr, /* dcid_status */
     nullptr, /* handshake_confirmed */
     nullptr, /* recv_new_token */
@@ -550,31 +550,31 @@ static ngtcp2_callbacks client_ngtcp2_callbacks = {
 static ngtcp2_callbacks server_ngtcp2_callbacks = {
   nullptr, /* client_initial */
   ngtcp2_crypto_recv_client_initial_cb, /* recv_client_initial */
-  cb_recv_crypto_data,
-  cb_handshake_completed,
+  ::cb_recv_crypto_data,
+  ::cb_handshake_completed,
   nullptr, /* recv_version_negotiation */
   ngtcp2_crypto_encrypt_cb,
   ngtcp2_crypto_decrypt_cb,
   ngtcp2_crypto_hp_mask_cb,
-  cb_recv_stream_data,
+  ::cb_recv_stream_data,
   nullptr, /* acked_crypto_offset */
-  cb_acked_stream_data_offset,
+  ::cb_acked_stream_data_offset,
   nullptr, /* stream_open */
-  cb_stream_close,
+  ::cb_stream_close,
   nullptr, /* recv_stateless_reset */
   ngtcp2_crypto_recv_retry_cb,
   nullptr, /* cb_extend_max_local_streams_bidi */
   nullptr, /* extend_max_local_streams_uni */
   nullptr, /* rand  */
-  cb_get_new_connection_id,
+  ::cb_get_new_connection_id,
   nullptr, /* remove_connection_id */
   ngtcp2_crypto_update_key_cb, /* update_key */
   nullptr, /* path_validation */
   nullptr, /* select_preferred_addr */
-  cb_stream_reset,
+  ::cb_stream_reset,
   nullptr, /* extend_max_remote_streams_bidi */
   nullptr, /* extend_max_remote_streams_uni */
-  cb_extend_max_stream_data,
+  ::cb_extend_max_stream_data,
   nullptr, /* dcid_status */
   nullptr, /* handshake_confirmed */
   nullptr, /* recv_new_token */
@@ -1084,12 +1084,12 @@ cb_h3_send_stop_sending(
 
 static nghttp3_callbacks nghttp3_client_callbacks = {
     nullptr, /* acked_stream_data */
-    cb_h3_stream_close,
-    cb_h3_recv_data,
-    cb_h3_deferred_consume,
+    ::cb_h3_stream_close,
+    ::cb_h3_recv_data,
+    ::cb_h3_deferred_consume,
     nullptr, /* begin_headers */
-    cb_h3_recv_header,
-    cb_h3_end_headers,
+    ::cb_h3_recv_header,
+    ::cb_h3_end_headers,
     nullptr, /* begin_trailers */
     cb_h3_recv_header,
     nullptr, /* end_trailers */
@@ -1097,7 +1097,7 @@ static nghttp3_callbacks nghttp3_client_callbacks = {
     nullptr, /* http_recv_push_promise */
     nullptr, /* http_end_push_promise */
     nullptr, /* http_cancel_push */
-    cb_h3_send_stop_sending,
+    ::cb_h3_send_stop_sending,
     nullptr, /* push_stream */
     nullptr, /* end_stream */
     nullptr, /* reset_stream */
@@ -1488,33 +1488,12 @@ Errata
 H3Session::accept()
 {
   swoc::Errata errata;
-  //
-  // TODO: This is all just stubbed out. Copied over from HTTP/2, so most of it
-  // is wrong. Flesh this out when we implement server-side HTTP/3
-  //
 
-  // Check that the HTTP/3 protocol was negotiated.
-  unsigned char const *alpn = nullptr;
-  unsigned int alpnlen = 0;
-#ifdef OPENSSL_NO_NEXTPROTONEG
-  SSL_get0_next_proto_negotiated(this->_ssl, &alpn, &alpnlen);
-#endif /* !OPENSSL_NO_NEXTPROTONEG */
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
-  if (alpn == nullptr) {
-    SSL_get0_alpn_selected(this->_ssl, &alpn, &alpnlen);
-  }
-#endif /* OPENSSL_VERSION_NUMBER >= 0x10002000L */
-
-  if (alpn != nullptr && alpnlen == 2 && memcmp("h3", alpn, 2) == 0) {
-    errata.diag(R"(Negotiated ALPN: {}, HTTP/3 is negotiated.)", TextView{(char *)alpn, alpnlen});
-  } else {
-    errata.error(
-        R"(Negotiated ALPN: {}, HTTP/3 failed to negotiate.)",
-        (alpn == nullptr) ? "none" : TextView{(char *)alpn, alpnlen});
+  errata.note(this->server_session_init());
+  if (!errata.is_ok()) {
+    errata.error("HTTP/3 TLS accept failed.");
     return errata;
   }
-
-  this->server_session_init();
   errata.diag("Finished accept using H3Session");
   return errata;
 }
@@ -1527,7 +1506,7 @@ H3Session::connect()
 
   errata.note(this->client_session_init());
   if (!errata.is_ok()) {
-    errata.error("TLS initialization failed.");
+    errata.error("HTTP/3 TLS initialization failed.");
     return errata;
   }
 
@@ -2097,7 +2076,7 @@ H3Session::server_session_init()
   ngtcp2_addr_init(&path.local, quic_socket.local_addr, quic_socket.local_addr.size());
   ngtcp2_addr_init(&path.remote, &this->_endpoint->sa, this->_endpoint->size());
 
-  auto const rc = ngtcp2_conn_client_new(
+  auto const rc = ngtcp2_conn_server_new(
       &quic_socket.qconn,
       &quic_socket.dcid,
       &quic_socket.scid,
