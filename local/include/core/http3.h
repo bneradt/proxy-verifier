@@ -375,6 +375,7 @@ private:
 
   /** Create and configure the SSL instance for this session. */
   swoc::Errata client_ssl_session_init(SSL_CTX *client_context);
+  swoc::Errata server_ssl_session_init(SSL_CTX *server_context);
 
   swoc::Errata receive_responses();
 

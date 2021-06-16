@@ -1050,10 +1050,6 @@ main(int /* argc */, char const *argv[])
           "",
           1,
           "")
-#if 0
-      // Server-side HTTP/3 is not implemented yet. Don't confuse the user by
-      // showing this option. When we implement server-side HTTP/3, uncomment
-      // this code.
       .add_option(
           "--listen-http3",
           "",
@@ -1061,7 +1057,6 @@ main(int /* argc */, char const *argv[])
           "",
           1,
           "")
-#endif
       .add_option("--format", "-f", "Transaction key format", "", 1, "")
       .add_option(
           "--server-cert",

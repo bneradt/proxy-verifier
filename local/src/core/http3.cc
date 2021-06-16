@@ -547,8 +547,6 @@ static ngtcp2_callbacks client_ngtcp2_callbacks = {
     nullptr, /* lost_datagram */
 };
 
-// TODO: fill this out when we add server-side code.
-#if 0
 static ngtcp2_callbacks server_ngtcp2_callbacks = {
   nullptr, /* client_initial */
   ngtcp2_crypto_recv_client_initial_cb, /* recv_client_initial */
@@ -565,7 +563,7 @@ static ngtcp2_callbacks server_ngtcp2_callbacks = {
   cb_stream_close,
   nullptr, /* recv_stateless_reset */
   ngtcp2_crypto_recv_retry_cb,
-  cb_extend_max_local_streams_bidi,
+  nullptr, /* cb_extend_max_local_streams_bidi */
   nullptr, /* extend_max_local_streams_uni */
   nullptr, /* rand  */
   cb_get_new_connection_id,
@@ -582,9 +580,10 @@ static ngtcp2_callbacks server_ngtcp2_callbacks = {
   nullptr, /* recv_new_token */
   ngtcp2_crypto_delete_crypto_aead_ctx_cb,
   ngtcp2_crypto_delete_crypto_cipher_ctx_cb,
-  nullptr /* recv_datagram */
+  nullptr, /* recv_datagram */
+  nullptr, /* ack_datagram */
+  nullptr, /* lost_datagram */
 };
-#endif
 
 // --------------------------------------------
 // End ngtcp2 callbacks.
@@ -1846,7 +1845,7 @@ H3Session::init(int *process_exit_code, TextView qlog_dir)
 void
 H3Session::terminate()
 {
-  H3Session::terminate(_h3_server_context);
+  H3Session::terminate(_h3_client_context);
   H3Session::terminate(_h3_server_context);
 }
 
@@ -1951,6 +1950,21 @@ H3Session::client_ssl_session_init(SSL_CTX *client_context)
 }
 
 Errata
+H3Session::server_ssl_session_init(SSL_CTX *server_context)
+{
+  Errata errata;
+  assert(quic_socket.ssl == nullptr);
+  quic_socket.ssl = SSL_new(server_context);
+
+  if (SSL_set_app_data(quic_socket.ssl, this) == 0) {
+    errata.error("SSL_set_app_data failed: {}", swoc::bwf::SSLError{});
+  }
+  SSL_set_connect_state(quic_socket.ssl);
+
+  return errata;
+}
+
+Errata
 H3Session::receive_responses()
 {
   Errata errata;
@@ -2048,6 +2062,78 @@ Errata
 H3Session::server_session_init()
 {
   Errata errata;
-  // TODO: stubbed out. Flesh this out when we implement server-side HTTP/3.
+  quic_socket.version = NGTCP2_PROTO_VER_MAX;
+
+  errata.note(server_ssl_session_init(_h3_server_context));
+  if (!errata.is_ok()) {
+    errata.error("Failure initializing server-side SSL object.");
+    return errata;
+  }
+
+  quic_socket.dcid.datalen = NGTCP2_MAX_CIDLEN;
+  QuicSocket::randomly_populate_array(quic_socket.dcid.data, quic_socket.dcid.datalen);
+
+  quic_socket.scid.datalen = NGTCP2_MAX_CIDLEN;
+  QuicSocket::randomly_populate_array(quic_socket.scid.data, quic_socket.scid.datalen);
+
+  errata.note(quic_socket.open_qlog_file());
+
+  configure_quic_socket_settings(quic_socket, MAX_DRAIN_BUFFER_SIZE);
+
+  if (!quic_socket.local_addr.is_valid()) {
+    struct sockaddr_storage socket_address;
+    socklen_t socket_address_len = sizeof(socket_address);
+    auto const rv =
+        getsockname(this->get_fd(), (struct sockaddr *)&socket_address, &socket_address_len);
+    if (rv == -1) {
+      errata.error("getsockname failed: {}", Errno{});
+      return errata;
+    }
+    quic_socket.local_addr.assign(reinterpret_cast<struct sockaddr *>(&socket_address));
+  }
+
+  ngtcp2_path path;
+  memset(&path, 0, sizeof(path));
+  ngtcp2_addr_init(&path.local, quic_socket.local_addr, quic_socket.local_addr.size());
+  ngtcp2_addr_init(&path.remote, &this->_endpoint->sa, this->_endpoint->size());
+
+  auto const rc = ngtcp2_conn_client_new(
+      &quic_socket.qconn,
+      &quic_socket.dcid,
+      &quic_socket.scid,
+      &path,
+      NGTCP2_PROTO_VER_MIN,
+      &server_ngtcp2_callbacks,
+      &quic_socket.settings,
+      &quic_socket.transport_params,
+      nullptr,
+      this /* The user_data in the ngtcp2 callbacks. */);
+  if (rc != 0) {
+    errata.error("ngtcp2_conn_client_new failed.");
+    return errata;
+  }
+
+  ngtcp2_conn_set_tls_native_handle(quic_socket.qconn, quic_socket.ssl);
+
+  // Commence handshake.
+  if (ngtcp2_flush_egress(*this) < 0) {
+    errata.error("Error writing bytes during QUIC TLS handshake.");
+    return errata;
+  }
+
+  // Now that we went our first packet, exchange packets until the handshake is
+  // complete.
+  bool handshake_completed = ngtcp2_conn_get_handshake_completed(quic_socket.qconn);
+  while (!handshake_completed) {
+    errata.note(nghttp3_receive_and_send_data(*this, Poll_Timeout));
+    if (!errata.is_ok()) {
+      errata.error("Encountered a problem while completing the handshake.");
+      break;
+    }
+    handshake_completed = ngtcp2_conn_get_handshake_completed(quic_socket.qconn);
+  }
+  if (!handshake_completed) {
+    errata.error("Could not complete the QUIC handshake.");
+  }
   return errata;
 }
