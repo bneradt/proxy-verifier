@@ -149,10 +149,10 @@ struct Engine
   void command_run();
 
   /// The process return code with which to exit.
-  static int process_exit_code;
+  static std::atomic<int> process_exit_code;
 };
 
-int Engine::process_exit_code = 0;
+std::atomic<int> Engine::process_exit_code = 0;
 
 /** Handle SIGINT, exiting with an appropriate exit code.
  *

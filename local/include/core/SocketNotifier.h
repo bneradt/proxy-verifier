@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "core/PollTypes.h"
+
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -15,18 +17,6 @@
 #include <vector>
 
 class Session;
-
-/** The information needed to notify a session that its poll is done. */
-struct NotificationInfo
-{
-  NotificationInfo(std::weak_ptr<Session> session, int revent);
-
-  /** The session awaiting a poll result. */
-  std::weak_ptr<Session> session;
-
-  /** The poll output variable for this session's poll. */
-  int revents = 0;
-};
 
 /** Notifies waiting sessions that their sockets are ready.
  *
@@ -40,7 +30,7 @@ public:
    *
    * @param[in] notification_infos The list of sessions and their poll events.
    */
-  static void notify_sessions(std::vector<NotificationInfo> const &notification_infos);
+  static void notify_sessions(std::vector<PollResult> const &notification_infos);
 
   /** No longer notify the indicated session.
    * @param[in] fd The file descriptor of the session to no longer notify.
@@ -73,8 +63,8 @@ private:
   static bool _stop_notifier_flag;
 
   /** The outstanding callbacks that still need to be dispatched. */
-  std::unordered_map<int, NotificationInfo> _notification_infos;
-  std::mutex _notification_infos_mutex;
+  std::unordered_map<int, PollResult> _poll_results;
+  std::mutex _poll_results_mutex;
 
   /** The Poller is our producer which wakes up the thread via @a notify_sessions. */
   std::condition_variable _notification_infos_cv;

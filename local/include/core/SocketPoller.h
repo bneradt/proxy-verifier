@@ -7,6 +7,9 @@
 
 #pragma once
 
+#include "core/PollManager.h"
+#include "core/PollTypes.h"
+
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -15,8 +18,8 @@
 #include <unordered_map>
 #include <vector>
 
-class Session;
 class Notifier;
+class Session;
 
 /** Polls on the various sockets and awakes the waiting sessions as the sockets
  * become ready.
@@ -54,27 +57,19 @@ public:
    *
    * @param[in] fd The file descriptor to remove from the list of fds to poll upon.
    */
-  static void remove_poll_request(int fd);
+  static void unregister_poll_request(int fd);
 
   /** Remove the specified file descriptors from the list of fds to poll upon.
    *
    * This function is more efficient than calling deregister_session for each
    * session in the vector because it grabs the lock only once.
    *
-   * @param[in] fds The list of file descriptors to remove from the list of fds
-   * to poll upon.
+   * @param[in] poll_results The results of the last call to poll.
    */
-  static void remove_poll_requests(std::vector<int> const &fds);
+  static void unregister_poll_requests(std::vector<PollResult> const &poll_results);
 
 private:
   /** The set of information requested for a call to poll(2). */
-  class PollInfo
-  {
-  public:
-    PollInfo(std::weak_ptr<Session> session, short events);
-    std::weak_ptr<Session> session;
-    short events = 0;
-  };
 
 private:
   SocketPoller() = default;
@@ -91,6 +86,19 @@ private:
    * notification requests to SocketNotifier as socket events are ready.
    */
   void _start_polling();
+
+  enum class AwaitStatus {
+    CONTINUE_POLLING,
+    STOP_POLLING,
+  };
+
+  /** Wait for a notification to poll on the registered file descriptors.
+   *
+   * @a _poll_fd_manager is updated with the new set of polling requests.
+   *
+   * @return The status of awaiting the next poll.
+   */
+  AwaitStatus _await_polling_requests();
 
 private:
   /** The poller singleton. */
@@ -111,10 +119,13 @@ private:
    * This is a map from file descriptor to the session and desired events for
    * that session.
    */
-  std::unordered_map<int, PollInfo> _polling_requests;
+  std::unordered_map<int, PollInput> _polling_requests;
   std::mutex _polling_requests_mutex;
 
   /** Many producers, one consumer. @a register_session awakes the polling
    * consumer from the set of session threads. */
   std::condition_variable _polling_requests_cv;
+
+  /** Used to interact with the poll() interface. */
+  PollManager _poll_fd_manager;
 };

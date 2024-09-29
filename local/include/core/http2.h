@@ -156,7 +156,7 @@ public:
    * conditions. This is necessary because many nghttp2 callbacks do
    * not have direct returns to their callers.
    */
-  static swoc::Errata init(int *process_exit_code);
+  static swoc::Errata init(std::atomic<int> *process_exit_code);
 
   /** Delete global instances. */
   static void terminate();
@@ -284,7 +284,7 @@ private:
   static SSL_CTX *h2_client_context;
 
   /// The system status code. This is set to non-zero if problems are detected.
-  static int *process_exit_code;
+  static std::atomic<int> *process_exit_code;
 
   /// The set of streams which have completed already.
   std::unordered_set<std::string> _finished_streams;

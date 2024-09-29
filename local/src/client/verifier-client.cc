@@ -78,10 +78,12 @@ struct TargetSelector
     if (http_targets.empty()) {
       return nullptr;
     }
-    auto const *http_target = &http_targets[http_target_index];
-    if (++http_target_index >= http_targets.size()) {
-      http_target_index = 0;
+    auto index = ++http_target_index;
+    if (index >= http_targets.size()) {
+      http_target_index.compare_exchange_weak(index, 0);
+      index = 0;
     }
+    auto const *http_target = &http_targets[index];
     return http_target;
   }
 
@@ -92,10 +94,12 @@ struct TargetSelector
     if (https_targets.empty()) {
       return nullptr;
     }
-    auto const *https_target = &https_targets[https_target_index];
-    if (++https_target_index >= https_targets.size()) {
-      https_target_index = 0;
+    auto index = ++https_target_index;
+    if (index >= https_targets.size()) {
+      https_target_index.compare_exchange_weak(index, 0);
+      index = 0;
     }
+    auto const *https_target = &https_targets[index];
     return https_target;
   }
 
@@ -106,10 +110,13 @@ struct TargetSelector
     if (http3_targets.empty()) {
       return nullptr;
     }
-    auto const *http3_target = &http3_targets[http3_target_index];
-    if (++http3_target_index >= http3_targets.size()) {
-      http3_target_index = 0;
+
+    auto index = ++http3_target_index;
+    if (index >= http3_targets.size()) {
+      http3_target_index.compare_exchange_weak(index, 0);
+      index = 0;
     }
+    auto const *http3_target = &http3_targets[index];
     return http3_target;
   }
 
@@ -118,9 +125,9 @@ struct TargetSelector
   std::deque<swoc::IPEndpoint> http3_targets;
 
 private:
-  size_t http_target_index = 0;
-  size_t https_target_index = 0;
-  size_t http3_target_index = 0;
+  std::atomic<size_t> http_target_index = 0;
+  std::atomic<size_t> https_target_index = 0;
+  std::atomic<size_t> http3_target_index = 0;
 };
 
 TargetSelector Target_Selector;
@@ -639,7 +646,7 @@ public:
   void command_run();
 
   /// The process return code with which to exit.
-  static int process_exit_code;
+  static std::atomic<int> process_exit_code;
 
 private:
   /// Parse the user's command line arguments.
@@ -671,7 +678,7 @@ private:
   size_t _max_content_length = 0;
 };
 
-int Engine::process_exit_code = 0;
+std::atomic<int> Engine::process_exit_code = 0;
 
 void
 Run_Session(Ssn const &ssn, TargetSelector &target_selector)

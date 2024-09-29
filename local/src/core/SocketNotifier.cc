@@ -16,20 +16,14 @@ SocketNotifier SocketNotifier::_socket_notifier; // Our singleton.
 std::thread SocketNotifier::_notifier_thread;
 bool SocketNotifier::_stop_notifier_flag = false;
 
-NotificationInfo::NotificationInfo(std::weak_ptr<Session> session, int revent)
-  : session(session)
-  , revents(revent)
-{
-}
-
 void
-SocketNotifier::notify_sessions(std::vector<NotificationInfo> const &notification_infos)
+SocketNotifier::notify_sessions(std::vector<PollResult> const &poll_results)
 {
   {
-    std::lock_guard<std::mutex> lock(_socket_notifier._notification_infos_mutex);
-    for (auto const &notification_info : notification_infos) {
-      if (auto session = notification_info.session.lock(); session) {
-        _socket_notifier._notification_infos.emplace(session->get_fd(), notification_info);
+    std::lock_guard<std::mutex> lock(_socket_notifier._poll_results_mutex);
+    for (auto const &poll_result : poll_results) {
+      if (auto session = poll_result.session.lock(); session) {
+        _socket_notifier._poll_results.emplace(poll_result.fd, poll_result);
       }
     }
   }
@@ -39,8 +33,8 @@ SocketNotifier::notify_sessions(std::vector<NotificationInfo> const &notificatio
 void
 SocketNotifier::drop_session_notification(int fd)
 {
-  std::lock_guard<std::mutex> lock(_socket_notifier._notification_infos_mutex);
-  _socket_notifier._notification_infos.erase(fd);
+  std::lock_guard<std::mutex> lock(_socket_notifier._poll_results_mutex);
+  _socket_notifier._poll_results.erase(fd);
 }
 
 void
@@ -61,22 +55,33 @@ SocketNotifier::stop_notifier_thread()
 void
 SocketNotifier::_start_notifying()
 {
+  std::vector<std::shared_ptr<Session>> sessions_to_release;
   while (!SocketNotifier::_stop_notifier_flag) {
-    std::unique_lock<std::mutex> lock(_notification_infos_mutex);
+    // Free the sessions while not holding _poll_results_mutex.
+    sessions_to_release.clear();
+    std::unique_lock<std::mutex> lock(_poll_results_mutex);
     _notification_infos_cv.wait(lock, [this]() {
-      return !_notification_infos.empty() || SocketNotifier::_stop_notifier_flag;
+      return !_poll_results.empty() || SocketNotifier::_stop_notifier_flag;
     });
 
     if (SocketNotifier::_stop_notifier_flag) {
       break;
     }
 
-    for (auto &[fd, notification_info] : _notification_infos) {
-      auto &[weak_session, revents] = notification_info;
+    for (auto &[fd, poll_result] : _poll_results) {
+      auto &[_, weak_session, revents] = poll_result;
       if (auto session = weak_session.lock(); session) {
+        // If we turn out to be the last holder of this session, we cannot
+        // destruct the session while holding the _poll_results_mutex.
+        // Otherwise, the Session destructor will call
+        // SocketNotifier::drop_session_notification, which will deadlock
+        // because it grabs that same mutex. Instead we'll free the sessions on
+        // the next iteration of the loop when we call free on the session
+        // vector.
+        sessions_to_release.push_back(session);
         session->handle_poll_return(revents);
       }
     }
-    _notification_infos.clear();
+    _poll_results.clear();
   }
 }

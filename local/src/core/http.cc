@@ -771,7 +771,7 @@ HttpHeader::Binding::operator()(BufferWriter &w, const swoc::bwf::Spec &spec) co
 Session::~Session()
 {
   if (_fd >= 0) {
-    SocketPoller::remove_poll_request(this->get_fd());
+    SocketPoller::unregister_poll_request(this->get_fd());
   }
   this->close();
 }
@@ -1048,7 +1048,7 @@ Session::poll_for_data_on_socket(chrono::milliseconds timeout, short events)
 
   if (timed_out) {
     // Clean up the SocketPoller so it doesn't try to call us back now.
-    SocketPoller::remove_poll_request(this->get_fd());
+    SocketPoller::unregister_poll_request(this->get_fd());
     return 0;
   } else {
     if (_revents & (POLLERR | POLLHUP | POLLNVAL)) {

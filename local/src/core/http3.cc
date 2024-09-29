@@ -64,7 +64,7 @@ constexpr char const *QUIC_CIPHERS = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA
 
 constexpr char const *QUIC_GROUPS = "P-256:X25519:P-384:P-521";
 
-int *H3Session::process_exit_code = nullptr;
+std::atomic<int> *H3Session::process_exit_code = nullptr;
 
 std::random_device QuicSocket::_rd;
 std::mt19937 QuicSocket::_rng(_rd());
@@ -2175,7 +2175,7 @@ SSL_CTX *H3Session::_h3_server_context = nullptr;
 
 // static
 Errata
-H3Session::init(int *process_exit_code, TextView qlog_dir)
+H3Session::init(std::atomic<int> *process_exit_code, TextView qlog_dir)
 {
   Errata errata;
   H3Session::process_exit_code = process_exit_code;

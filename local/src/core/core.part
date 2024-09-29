@@ -36,6 +36,7 @@ def build(env):
         env.StaticLibrary("verifier-core", [
             "ArgParser.cc",
             "Localizer.cc",
+            "PollManager.cc",
             "ProxyVerifier.cc",
             "SessionFactory.cc",
             "SocketNotifier.cc",

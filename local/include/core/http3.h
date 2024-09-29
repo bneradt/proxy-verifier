@@ -351,7 +351,7 @@ public:
    * @param[in] qlog_dir The directory for qlog files. If this is an empty
    * string, no QUIC logging will be done.
    */
-  static swoc::Errata init(int *process_exit_code, swoc::TextView qlog_dir);
+  static swoc::Errata init(std::atomic<int> *process_exit_code, swoc::TextView qlog_dir);
 
   /** Delete global instances. */
   static void terminate();
@@ -470,5 +470,5 @@ private:
   static SSL_CTX *_h3_server_context;
 
   /// The system status code. This is set to non-zero if problems are detected.
-  static int *process_exit_code;
+  static std::atomic<int> *process_exit_code;
 };

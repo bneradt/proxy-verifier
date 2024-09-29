@@ -103,7 +103,7 @@ static ssize_t receive_nghttp2_request(
     void *user_data,
     milliseconds timeout);
 
-int *H2Session::process_exit_code = nullptr;
+std::atomic<int> *H2Session::process_exit_code = nullptr;
 
 swoc::Rv<int>
 H2Session::poll_for_headers(chrono::milliseconds timeout)
@@ -1770,7 +1770,7 @@ H2Session::send_connection_settings()
 
 // static
 Errata
-H2Session::init(int *process_exit_code)
+H2Session::init(std::atomic<int> *process_exit_code)
 {
   H2Session::process_exit_code = process_exit_code;
   Errata errata = H2Session::client_init(h2_client_context);
