@@ -20,6 +20,14 @@
 #include <thread>
 #include <unordered_set>
 
+
+
+
+#include <iostream>
+
+
+
+
 using swoc::Errata;
 
 // Static instantiations.
@@ -195,6 +203,7 @@ SocketPoller::_start_polling()
 
     auto const poll_result =
         ::poll(poll_fd_manager.data(), poll_fd_manager.size(), SocketPoller::_poll_timeout.count());
+    std::cout << "Polled with " << poll_fd_manager.size() << " fds. num events: " << poll_result << std::endl;
     if (poll_result == 0) {
       // Timeout. Simply loop backaround and poll again. Maybe other fd's have
       // been registered.
