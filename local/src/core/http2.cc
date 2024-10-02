@@ -625,7 +625,7 @@ receive_nghttp2_data(
       return -1;
     } else if (poll_return == 0) {
       // Timeout in this context is OK.
-      //send_nghttp2_data(session, nullptr, 0, 0, user_data);
+      send_nghttp2_data(session, nullptr, 0, 0, user_data);
       return 0;
     }
     // Poll succeeded. Repeat the attempt to read.
@@ -683,7 +683,7 @@ receive_nghttp2_responses(
     if (received_bytes == 0) { // timeout
       std::cout << "Timeout with " << session_data->_num_unended_streams << " unended streams.\n";
       ++timeout_count;
-      if (timeout_count > 2) {
+      if (timeout_count > 200) {
         Errata errata;
         errata.note(S_INFO, "{} timeouts while waiting for the following streams:", timeout_count);
         for (auto &&[id, stream_state] : session_data->_stream_map) {
