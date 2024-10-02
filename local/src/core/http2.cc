@@ -625,6 +625,7 @@ receive_nghttp2_data(
       return -1;
     } else if (poll_return == 0) {
       // Timeout in this context is OK.
+      send_nghttp2_data(session, nullptr, 0, 0, user_data);
       return 0;
     }
     // Poll succeeded. Repeat the attempt to read.
