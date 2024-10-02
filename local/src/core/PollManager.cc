@@ -15,6 +15,13 @@
 #include <cstring>
 #include <unordered_map>
 
+
+
+#include <iostream>
+
+
+
+
 #ifdef SUPPORTS_EPOLL
 #include <sys/epoll.h>
 #else
@@ -135,6 +142,7 @@ PollManager::poll(std::chrono::milliseconds timeout)
   if (nfds > 0) {
     _epoll_events.resize(nfds);
   }
+  std::cout << "Polling for " << _contained_fds.size() << " fds, got " << nfds << " events\n";
   return nfds;
 #else
   int const nfds = ::poll(_poll_fds.data(), _poll_fds.size(), timeout.count());
