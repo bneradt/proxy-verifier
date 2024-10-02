@@ -582,7 +582,7 @@ delete_thread_info_session(ServerThreadInfo &thread_info)
   if (!thread_info._session) {
     return;
   }
-  std::unique_lock<std::mutex> lock(thread_info._mutex);
+  std::unique_lock<std::mutex> lock(thread_info._data_ready_mutex);
   thread_info._session.reset();
 }
 
@@ -795,9 +795,11 @@ TF_Accept(int socket_fd, bool do_https, bool do_http3)
     if (nullptr == thread_info) {
       errata.note(S_ERROR, "Failed to get worker thread");
     } else {
-      std::unique_lock<std::mutex> lock(thread_info->_mutex);
+      std::unique_lock<std::mutex> lock(thread_info->_data_ready_mutex);
       thread_info->_session = std::move(session);
-      thread_info->_cvar.notify_one();
+      lock.unlock();
+      std::cout << "Notifying data ready" << std::endl;
+      thread_info->_data_ready_cvar.notify_one();
     }
   }
 }

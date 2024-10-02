@@ -1126,9 +1126,11 @@ Engine::replay_traffic()
       } else {
         // Only pointer to worker thread info.
         {
-          std::unique_lock<std::mutex> lock(thread_info->_mutex);
+          std::unique_lock<std::mutex> lock(thread_info->_data_ready_mutex);
           thread_info->_ssn = ssn.get();
-          thread_info->_cvar.notify_one();
+          lock.unlock();
+          std::cout << "notifying data ready" << std::endl;
+          thread_info->_data_ready_cvar.notify_one();
         }
       }
       ++n_ssn;
