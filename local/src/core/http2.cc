@@ -29,7 +29,6 @@ using swoc::Errata;
 using swoc::TextView;
 using namespace swoc::literals;
 using namespace std::literals;
-using std::this_thread::sleep_for;
 
 namespace chrono = std::chrono;
 using ClockType = std::chrono::system_clock;
@@ -676,7 +675,7 @@ receive_nghttp2_responses(
   auto timeout_count = 0;
   while (!session_data->_stream_map.empty() && !session_data->sent_goaway_frame) {
     auto const received_bytes =
-        receive_nghttp2_data(session, nullptr, 0, 0, user_data, Poll_Timeout);
+        receive_nghttp2_data(session, nullptr, 0, 0, user_data, 10ms);
     if (received_bytes < 0) {
       break;
     }
