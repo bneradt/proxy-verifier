@@ -23,7 +23,6 @@
 
 
 #include <iostream>
-#include <poll.h>
 
 using swoc::Errata;
 using swoc::TextView;
@@ -381,11 +380,8 @@ TLSSession::accept()
           swoc::bwf::Errno{});
       break;
     }
-    struct pollfd fd;
-    fd.fd = get_fd();
-    fd.events = events;
-    int poll_return = ::poll(&fd, 1, 100);
-    //errata.note(std::move(poll_errata));
+    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(100ms, events);
+    errata.note(std::move(poll_errata));
     if (!errata.is_ok()) {
       errata.note(S_ERROR, R"(Failed SSL_accept during poll: {}.)", swoc::bwf::Errno{});
     } else if (poll_return == 0) {
@@ -454,11 +450,8 @@ TLSSession::connect(SSL_CTX *client_context)
           swoc::bwf::Errno{});
       break;
     }
-    struct pollfd fd;
-    fd.fd = get_fd();
-    fd.events = events;
-    int poll_return = ::poll(&fd, 1, 100);
-    //errata.note(std::move(poll_errata));
+    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(100ms, events);
+    errata.note(std::move(poll_errata));
     if (!errata.is_ok()) {
       errata.note(S_ERROR, "Failed SSL_connect during poll.");
       return errata;
