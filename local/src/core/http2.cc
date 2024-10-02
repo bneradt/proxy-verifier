@@ -559,7 +559,7 @@ send_nghttp2_data(
 {
   Errata errata;
   H2Session *session_data = reinterpret_cast<H2Session *>(user_data);
-  int total_amount_sent = 0;
+  ssize_t total_amount_sent = 0;
   while (true) {
     uint8_t const *data = nullptr;
     ssize_t datalen = nghttp2_session_mem_send2(session, &data);
@@ -570,7 +570,7 @@ send_nghttp2_data(
       errata.note(S_ERROR, "Failure calling nghttp2_session_mem_send2: {}", datalen);
       break;
     }
-    int amount_sent = 0;
+    ssize_t amount_sent = 0;
     while (amount_sent < datalen) {
       auto const n = session_data->write(TextView{(char *)data, (size_t)datalen});
       if (n <= 0) {
@@ -581,7 +581,7 @@ send_nghttp2_data(
     total_amount_sent += amount_sent;
   }
 
-  return (ssize_t)total_amount_sent;
+  return total_amount_sent;
 }
 
 /**
@@ -625,7 +625,7 @@ receive_nghttp2_data(
       return -1;
     } else if (poll_return == 0) {
       // Timeout in this context is OK.
-      send_nghttp2_data(session, nullptr, 0, 0, user_data);
+      //send_nghttp2_data(session, nullptr, 0, 0, user_data);
       return 0;
     }
     // Poll succeeded. Repeat the attempt to read.
