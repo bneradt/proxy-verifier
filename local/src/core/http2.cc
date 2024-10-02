@@ -681,7 +681,6 @@ receive_nghttp2_responses(
       break;
     }
     if (received_bytes == 0) { // timeout
-      std::cout << "Timeout with " << session_data->_num_unended_streams << " unended streams.\n";
       ++timeout_count;
       if (timeout_count > 200) {
         Errata errata;
