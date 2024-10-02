@@ -338,7 +338,7 @@ TLSSession::poll_for_data_on_ssl_socket(chrono::milliseconds timeout, int ssl_er
   if (ssl_error == SSL_ERROR_WANT_READ) {
     events = POLLIN;
   } else if (ssl_error == SSL_ERROR_WANT_WRITE) {
-    events = POLLOUT;
+    events = POLLIN | POLLOUT;
   }
   return poll_for_data_on_socket(timeout, events);
 }
@@ -369,7 +369,7 @@ TLSSession::accept()
     // times to finish the accept.
     short events = 0;
     if (ssl_error == SSL_ERROR_WANT_WRITE || ssl_error == SSL_ERROR_WANT_ACCEPT) {
-      events = POLLOUT;
+      events = POLLIN | POLLOUT;
     } else if (ssl_error == SSL_ERROR_WANT_READ) {
       events = POLLIN;
     } else {
@@ -439,7 +439,7 @@ TLSSession::connect(SSL_CTX *client_context)
     // times to finish the accept.
     short events = 0;
     if (ssl_error == SSL_ERROR_WANT_WRITE || ssl_error == SSL_ERROR_WANT_CONNECT) {
-      events = POLLOUT;
+      events = POLLIN | POLLOUT;
     } else if (ssl_error == SSL_ERROR_WANT_READ) {
       events = POLLIN;
     } else {
