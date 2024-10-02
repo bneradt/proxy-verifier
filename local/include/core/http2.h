@@ -213,6 +213,7 @@ public:
 public:
   /// A mapping from stream_id to H2StreamState.
   std::unordered_map<int32_t, std::shared_ptr<H2StreamState>> _stream_map;
+  int32_t _num_unended_streams = 0;
 
 protected:
   static swoc::Errata client_init(SSL_CTX *&client_context);

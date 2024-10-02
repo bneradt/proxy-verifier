@@ -14,6 +14,13 @@
 #include <netdb.h>
 #include <thread>
 
+
+
+#include <iostream>
+
+
+
+
 #include "swoc/bwf_ex.h"
 #include "swoc/bwf_ip.h"
 #include "swoc/bwf_std.h"
@@ -412,6 +419,7 @@ H2Session::run_transaction(Txn const &txn)
 {
   Errata errata;
   auto &&[bytes_written, write_errata] = this->write(txn._req);
+  ++_num_unended_streams;
   errata.note(std::move(write_errata));
   _last_added_stream->_specified_response = &txn._rsp;
   return errata;
@@ -673,6 +681,7 @@ receive_nghttp2_responses(
       break;
     }
     if (received_bytes == 0) { // timeout
+      std::cout << "Timeout with " << session_data->_num_unended_streams << " unended streams.\n";
       ++timeout_count;
       if (timeout_count > 2) {
         Errata errata;
@@ -931,6 +940,7 @@ on_frame_recv_cb(nghttp2_session * /* session */, nghttp2_frame const *frame, vo
     if (flags & NGHTTP2_FLAG_END_STREAM) {
       // We already verified above that this is in our _stream_map.
       session_data->set_stream_has_ended(stream_id, stream_map_iter->second->_key);
+      --session_data->_num_unended_streams;
     }
   }
   return 0;
