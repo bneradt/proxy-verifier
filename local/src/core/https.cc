@@ -386,7 +386,7 @@ TLSSession::accept()
       errata.note(S_ERROR, R"(Failed SSL_accept during poll: {}.)", swoc::bwf::Errno{});
     } else if (poll_return == 0) {
       // Timeout, try again.
-      std::cout << "SSL_accept timeout after 100ms\n";
+      std::cout << "SSL_accept timeout for " << get_fd() << " after 100ms\n";
       //errata.note(S_ERROR, "Timed out waiting to SSL_accept after {}.", Poll_Timeout);
       //return errata;
     } else if (poll_return < 0) {
@@ -462,7 +462,7 @@ TLSSession::connect(SSL_CTX *client_context)
       return errata;
     } else if (poll_return == 0) {
       // timeout, try again.
-      std::cout << "SSL_connect timeout after 100ms\n";
+      std::cout << "SSL_connect timeout for fd " << get_fd() << " after 100ms\n";
       //errata.note(S_ERROR, "Poll timed out for SSL_connect after {}.", Poll_Timeout);
       //return errata;
     }
