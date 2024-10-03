@@ -377,7 +377,7 @@ TLSSession::accept()
       errata.note(
           S_ERROR,
           R"(Failed SSL_accept {}, {}.)",
-          swoc::bwf::SSLError{_ssl, retval},
+          swoc::bwf::SSLError{ssl_error},
           swoc::bwf::Errno{});
       break;
     }
@@ -456,7 +456,7 @@ TLSSession::connect(SSL_CTX *client_context)
       errata.note(
           S_ERROR,
           R"(Failed SSL_connect {}, {}.)",
-          swoc::bwf::SSLError{_ssl, retval},
+          swoc::bwf::SSLError{ssl_error},
           swoc::bwf::Errno{});
       break;
     }
