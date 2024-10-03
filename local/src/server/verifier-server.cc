@@ -588,10 +588,15 @@ TF_Serve_Connection(std::thread *t)
 {
   ServerThreadInfo thread_info;
   thread_info._thread = t;
+  auto last_time = std::chrono::system_clock::now();
   while (!Shutdown_Flag) {
     swoc::Errata errata;
 
     Server_Thread_Pool.wait_for_work(&thread_info);
+    auto delta = std::chrono::system_clock::now() - last_time;
+    if (delta > 50ms) {
+      std::cout << "It took " << std::chrono::duration_cast<milliseconds>(delta).count() << "ms to get a session." << std::endl;
+    }
     if (Shutdown_Flag) {
       // Calling Shutdown is a condition that releases wait_for_work.
       delete_thread_info_session(thread_info);
@@ -737,7 +742,7 @@ TF_Serve_Connection(std::thread *t)
           thread_info._session->write(specified_transaction._rsp);
       thread_errata.note(std::move(write_errata));
     }
-
+    last_time = std::chrono::system_clock::now();
     // cleanup and get ready for another session.
     delete_thread_info_session(thread_info);
   }

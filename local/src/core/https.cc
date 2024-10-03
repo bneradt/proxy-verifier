@@ -8,6 +8,7 @@
 #include "core/https.h"
 #include "core/ProxyVerifier.h"
 
+#include <chrono>
 #include <dirent.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -19,6 +20,13 @@
 #include "swoc/bwf_ex.h"
 #include "swoc/bwf_ip.h"
 #include "swoc/bwf_std.h"
+
+
+
+
+#include <iostream>
+
+
 
 using swoc::Errata;
 using swoc::TextView;
@@ -358,6 +366,7 @@ TLSSession::accept()
     errata.note(S_ERROR, R"(Failed SSL_set_fd: {}.)", swoc::bwf::SSLError{});
     return errata;
   }
+  auto before = std::chrono::steady_clock::now();
   int retval = SSL_accept(_ssl);
   while (retval < 0) {
     auto const ssl_error = SSL_get_error(_ssl, retval);
@@ -390,6 +399,10 @@ TLSSession::accept()
     }
     // Poll succeeded.
     retval = SSL_accept(_ssl);
+  }
+  auto delta = std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - before);
+  if (delta > 100ms) {
+    std::cout << "TLS handshake took " << delta.count() << "ms" << std::endl;
   }
   errata.note(S_DIAG, "Finished accept using TLSSession");
   return errata;
@@ -426,6 +439,7 @@ TLSSession::connect(SSL_CTX *client_context)
         _client_verify_mode);
     SSL_set_verify(_ssl, _client_verify_mode, nullptr /* No verify_callback is passed */);
   }
+  auto before = std::chrono::steady_clock::now();
   int retval = SSL_connect(_ssl);
   while (retval < 0) {
     auto const ssl_error = SSL_get_error(_ssl, retval);
@@ -461,6 +475,11 @@ TLSSession::connect(SSL_CTX *client_context)
     // Poll succeeded.
     retval = SSL_connect(_ssl);
   }
+  auto delta = std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - before);
+  if (delta > 100ms) {
+    std::cout << "TLS handshake took " << delta.count() << "ms" << std::endl;
+  }
+
 
   auto const verify_result = SSL_get_verify_result(_ssl);
   errata.note(
