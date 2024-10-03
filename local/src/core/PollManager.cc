@@ -155,7 +155,8 @@ PollManager::process_poll_events(std::unordered_map<int, PollInput> const &poll_
 {
   assert(_just_called_poll);
   _just_called_poll = false;
-  std::vector<PollResult> poll_results;
+  static std::vector<PollResult> poll_results;
+  poll_results.clear();
   std::unique_lock<std::mutex> lock(_polling_requests_mutex);
 #ifdef SUPPORTS_EPOLL
   for (auto const &poll_result : _epoll_events) {
