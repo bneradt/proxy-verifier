@@ -22,6 +22,10 @@
 #include <thread>
 #include <unordered_set>
 
+
+
+#include <iostream>
+
 using swoc::Errata;
 
 // Static instantiations.
@@ -45,12 +49,24 @@ SocketPoller::request_poll(std::weak_ptr<Session> session, short events)
 void
 SocketPoller::unregister_poll_request(int fd)
 {
+  auto before_poller = std::chrono::steady_clock::now();
   {
     std::lock_guard<std::mutex> lock(_socket_poller._polling_requests_mutex);
     _socket_poller._polling_requests.erase(fd);
   } // Unlock the _polling_requests_mutex.
+  auto after_poller = std::chrono::steady_clock::now();
   _socket_poller._poll_fd_manager.remove_fd(fd);
+  auto after_poll_fd_manager = std::chrono::steady_clock::now();
   SocketNotifier::drop_session_notification(fd);
+  auto after_drop_notifications = std::chrono::steady_clock::now();
+
+  if ((before_poller - after_poller) > 20ms) {
+    std::cout << "erasing poller took: " << std::chrono::duration_cast<std::chrono::milliseconds>(before_poller - after_poller).count() << "ms" << std::endl;
+  } else if ((after_poll_fd_manager - after_poller) > 20ms) {
+    std::cout << "erasing poller took: " << std::chrono::duration_cast<std::chrono::milliseconds>(after_poll_fd_manager - after_poller).count() << "ms" << std::endl;
+  } else if ((after_drop_notifications - after_poll_fd_manager) > 20ms) {
+    std::cout << "erasing poller took: " << std::chrono::duration_cast<std::chrono::milliseconds>(after_drop_notifications - after_poll_fd_manager).count() << "ms" << std::endl;
+  }
 }
 
 void
