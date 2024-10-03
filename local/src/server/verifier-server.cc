@@ -742,6 +742,7 @@ TF_Serve_Connection(std::thread *t)
     }
 
     // cleanup and get ready for another session.
+    std::cout << "Cleaning up closed session.\n";
     delete_thread_info_session(thread_info);
   }
 }
