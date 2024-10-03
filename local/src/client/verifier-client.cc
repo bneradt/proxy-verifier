@@ -1129,7 +1129,6 @@ Engine::replay_traffic()
           std::unique_lock<std::mutex> lock(thread_info->_data_ready_mutex);
           thread_info->_ssn = ssn.get();
           lock.unlock();
-          std::cout << "notifying data ready" << std::endl;
           thread_info->_data_ready_cvar.notify_one();
         }
       }

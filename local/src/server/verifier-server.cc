@@ -798,7 +798,6 @@ TF_Accept(int socket_fd, bool do_https, bool do_http3)
       std::unique_lock<std::mutex> lock(thread_info->_data_ready_mutex);
       thread_info->_session = std::move(session);
       lock.unlock();
-      std::cout << "Notifying data ready" << std::endl;
       thread_info->_data_ready_cvar.notify_one();
     }
   }
