@@ -63,9 +63,9 @@ SocketPoller::unregister_poll_request(int fd)
   if ((before_poller - after_poller) > 20ms) {
     std::cout << "erasing poller took: " << std::chrono::duration_cast<std::chrono::milliseconds>(before_poller - after_poller).count() << "ms" << std::endl;
   } else if ((after_poll_fd_manager - after_poller) > 20ms) {
-    std::cout << "erasing poller took: " << std::chrono::duration_cast<std::chrono::milliseconds>(after_poll_fd_manager - after_poller).count() << "ms" << std::endl;
+    std::cout << "erasing fd_manager took: " << std::chrono::duration_cast<std::chrono::milliseconds>(after_poll_fd_manager - after_poller).count() << "ms" << std::endl;
   } else if ((after_drop_notifications - after_poll_fd_manager) > 20ms) {
-    std::cout << "erasing poller took: " << std::chrono::duration_cast<std::chrono::milliseconds>(after_drop_notifications - after_poll_fd_manager).count() << "ms" << std::endl;
+    std::cout << "erasing notification took: " << std::chrono::duration_cast<std::chrono::milliseconds>(after_drop_notifications - after_poll_fd_manager).count() << "ms" << std::endl;
   }
 }
 
