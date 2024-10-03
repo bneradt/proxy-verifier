@@ -363,6 +363,7 @@ TLSSession::accept()
     return errata;
   }
   int retval = SSL_accept(_ssl);
+  int poll_counter = 0;
   while (retval < 0) {
     auto const ssl_error = SSL_get_error(_ssl, retval);
     // Since there are multiple parts to the handshake, we may have to poll multiple
@@ -380,13 +381,16 @@ TLSSession::accept()
           swoc::bwf::Errno{});
       break;
     }
-    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(100ms, events);
+    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(10ms, events);
+    ++poll_counter;
     errata.note(std::move(poll_errata));
     if (!errata.is_ok()) {
       errata.note(S_ERROR, R"(Failed SSL_accept during poll: {}.)", swoc::bwf::Errno{});
     } else if (poll_return == 0) {
       // Timeout, try again.
-      std::cout << "SSL_accept timeout for " << get_fd() << " after 100ms\n";
+      if (poll_counter > 10) {
+        std::cout << "SSL_accept timeout for " << get_fd() << " after 100ms\n";
+      }
       //errata.note(S_ERROR, "Timed out waiting to SSL_accept after {}.", Poll_Timeout);
       //return errata;
     } else if (poll_return < 0) {
@@ -433,6 +437,7 @@ TLSSession::connect(SSL_CTX *client_context)
     SSL_set_verify(_ssl, _client_verify_mode, nullptr /* No verify_callback is passed */);
   }
   int retval = SSL_connect(_ssl);
+  int poll_counter = 0;
   while (retval < 0) {
     auto const ssl_error = SSL_get_error(_ssl, retval);
     // Since there are multiple parts to the handshake, we may have to poll multiple
@@ -450,7 +455,8 @@ TLSSession::connect(SSL_CTX *client_context)
           swoc::bwf::Errno{});
       break;
     }
-    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(100ms, events);
+    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(10ms, events);
+    ++poll_counter;
     errata.note(std::move(poll_errata));
     if (!errata.is_ok()) {
       errata.note(S_ERROR, "Failed SSL_connect during poll.");
@@ -462,7 +468,9 @@ TLSSession::connect(SSL_CTX *client_context)
       return errata;
     } else if (poll_return == 0) {
       // timeout, try again.
-      std::cout << "SSL_connect timeout for fd " << get_fd() << " for ssl error " << ssl_error << " after 100ms\n";
+      if (poll_counter > 10) {
+        std::cout << "SSL_connect timeout for fd " << get_fd() << " for ssl error " << ssl_error << " after 100ms\n";
+      }
       //errata.note(S_ERROR, "Poll timed out for SSL_connect after {}.", Poll_Timeout);
       //return errata;
     }

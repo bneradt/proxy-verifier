@@ -247,6 +247,7 @@ ThreadPool::wait_for_work(ThreadInfo *thread_info)
 ThreadInfo *
 ThreadPool::get_worker()
 {
+  static std::atomic<int> thread_counter = 0;
   ThreadInfo *thread_info = nullptr;
   {
     std::unique_lock<std::mutex> lock(this->_idleThreadsMutex);
@@ -258,6 +259,10 @@ ThreadPool::get_worker()
       // but the constructor needs to be called to get the object. Sigh.
       std::thread *t = &_allThreads.emplace_back();
       *t = this->make_thread(t);
+      ++thread_counter;
+      if (thread_counter % 10 == 0) {
+        std::cout << "Thread count: " << thread_counter << std::endl;
+      }
       // expect the new thread to enter itself in the pool and signal.
     }
     _idleThreadsCvar.wait(lock, [this] { return !_idleThreads.empty(); });
