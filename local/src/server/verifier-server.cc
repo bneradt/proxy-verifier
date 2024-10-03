@@ -750,7 +750,13 @@ TF_Serve_Connection(std::thread *t)
 
     // cleanup and get ready for another session.
     time_of_last_activity = std::chrono::steady_clock::now();
+    auto before_delete = std::chrono::steady_clock::now();
     delete_thread_info_session(thread_info);
+    auto after_delete = std::chrono::steady_clock::now();
+    auto delete_delta = std::chrono::duration_cast<milliseconds>(after_delete - before_delete);
+    if (delete_delta > 10ms) {
+      std::cout << "Why did it take " << delete_delta.count() << "ms to delete the session?\n";
+    }
   }
 }
 
