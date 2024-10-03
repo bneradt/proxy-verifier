@@ -603,8 +603,8 @@ TF_Serve_Connection(std::thread *t)
 
     // check for proxy protocol header from the socket
     errata.note(S_DIAG, "Checking for proxy protocol header.");
-    auto pp_eratta = thread_info._session->read_and_parse_proxy_hdr();
-    errata.note(std::move(pp_eratta));
+    //auto pp_eratta = thread_info._session->read_and_parse_proxy_hdr();
+    //errata.note(std::move(pp_eratta));
     auto accept_errata = thread_info._session->accept();
     errata.note(std::move(accept_errata));
     while (!Shutdown_Flag && !thread_info._session->is_closed() && errata.is_ok()) {
