@@ -28,6 +28,13 @@
 #include <locale>
 #include <codecvt>
 
+
+
+#include <iostream>
+
+
+
+
 #include "swoc/bwf_ex.h"
 #include "swoc/bwf_ip.h"
 #include "swoc/bwf_std.h"
@@ -771,7 +778,13 @@ HttpHeader::Binding::operator()(BufferWriter &w, const swoc::bwf::Spec &spec) co
 Session::~Session()
 {
   if (_fd >= 0) {
+    auto before = std::chrono::system_clock::now();
     SocketPoller::unregister_poll_request(this->get_fd());
+    auto after = std::chrono::system_clock::now();
+    auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
+    if (delta > 10ms) {
+      std::cout << "Warning: unregister_poll_request took " << delta.count() << "ms" << std::endl;
+    }
   }
   this->close();
 }
