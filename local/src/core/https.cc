@@ -381,9 +381,14 @@ TLSSession::accept()
           swoc::bwf::Errno{});
       break;
     }
-    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(10ms, events);
+    struct pollfd poll_fd;
+    poll_fd.fd = get_fd();
+    poll_fd.events = events;
+    int poll_return = ::poll(&poll_fd, 1, 10);
+
+    //auto &&[poll_return, poll_errata] = poll_for_data_on_socket(10ms, events);
     ++poll_counter;
-    errata.note(std::move(poll_errata));
+    //errata.note(std::move(poll_errata));
     if (!errata.is_ok()) {
       errata.note(S_ERROR, R"(Failed SSL_accept during poll: {}.)", swoc::bwf::Errno{});
     } else if (poll_return == 0) {
@@ -455,9 +460,13 @@ TLSSession::connect(SSL_CTX *client_context)
           swoc::bwf::Errno{});
       break;
     }
-    auto &&[poll_return, poll_errata] = poll_for_data_on_socket(10ms, events);
+    struct pollfd poll_fd;
+    poll_fd.fd = get_fd();
+    poll_fd.events = events;
+    int poll_return = ::poll(&poll_fd, 1, 10);
+    //auto &&[poll_return, poll_errata] = poll_for_data_on_socket(10ms, events);
     ++poll_counter;
-    errata.note(std::move(poll_errata));
+    //errata.note(std::move(poll_errata));
     if (!errata.is_ok()) {
       errata.note(S_ERROR, "Failed SSL_connect during poll.");
       return errata;
