@@ -16,6 +16,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstring>
@@ -591,6 +592,7 @@ TF_Serve_Connection(std::thread *t)
 {
   ServerThreadInfo thread_info;
   thread_info._thread = t;
+  auto time_of_last_activity = std::chrono::steady_clock::now();
   while (!Shutdown_Flag) {
     swoc::Errata errata;
 
@@ -599,6 +601,11 @@ TF_Serve_Connection(std::thread *t)
       // Calling Shutdown is a condition that releases wait_for_work.
       delete_thread_info_session(thread_info);
       break;
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto delta = now - time_of_last_activity;
+    if (delta > 100ms) {
+      std::cout << "Why did it take " << std::chrono::duration_cast<milliseconds>(delta).count() << "ms to get a session?\n";
     }
 
     // check for proxy protocol header from the socket
@@ -742,7 +749,7 @@ TF_Serve_Connection(std::thread *t)
     }
 
     // cleanup and get ready for another session.
-    std::cout << "Cleaning up closed session.\n";
+    time_of_last_activity = std::chrono::steady_clock::now();
     delete_thread_info_session(thread_info);
   }
 }
