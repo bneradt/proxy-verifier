@@ -135,10 +135,7 @@ SocketPoller::_start_polling()
     }
 
     // Poll succeeded. There are events to process.
-    {
-      std::lock_guard<std::mutex> lock(_polling_requests_mutex);
-      poll_results = _poll_fd_manager.process_poll_events(_polling_requests);
-    } // Unlock the _polling_requests_mutex.
+    poll_results = _poll_fd_manager.process_poll_events(_polling_requests);
     SocketPoller::unregister_poll_requests(poll_results);
     SocketNotifier::notify_sessions(poll_results);
   }
