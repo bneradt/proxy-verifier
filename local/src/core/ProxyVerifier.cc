@@ -220,6 +220,9 @@ Resolve_FQDN(swoc::TextView fqdn)
   } else {
     zret.note(S_ERROR, R"(Malformed address "{}".)", fqdn);
   }
+  if (zret.result().family() != AF_INET && zret.result().family() != AF_INET6) {
+    zret.note(S_ERROR, R"(Address "{}" is not an IPv4 or IPv6 address.)", fqdn);
+  }
   return zret;
 }
 

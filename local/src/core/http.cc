@@ -1760,6 +1760,7 @@ Session::do_connect(
     ProxyProtocolMsg *pp_msg)
 {
   Errata errata;
+  assert(real_target->family() == AF_INET || real_target->family() == AF_INET6);
   int socket_fd = socket(real_target->family(), SOCK_STREAM, 0);
   if (0 <= socket_fd) {
     int ONE = 1;
