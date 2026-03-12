@@ -274,15 +274,95 @@
           "description": "The field name and value pairs.",
           "type": "array",
           "items": {
-            "description": "HTTP field.",
+            "description": "HTTP field or verification rule.",
             "type": "array",
+            "minItems": 2,
+            "maxItems": 3,
             "items": [
               {
                 "description": "Name of the field.",
                 "type": "string"
               }, {
-                "description": "Value of the field.",
+                "description": "Value of the field or an inline verification rule.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        ]
+                      },
+                      "as": {
+                        "type": "string"
+                      },
+                      "not": {
+                        "type": "string"
+                      },
+                      "case": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              }, {
+                "description": "Legacy inline verification directive.",
                 "type": "string"
+              }
+            ]
+          }
+        },
+        "set-cookie-verifications": {
+          "description": "Verification rules for Set-Cookie field lines.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "as": {
+                    "type": "string"
+                  },
+                  "not": {
+                    "type": "string"
+                  },
+                  "case": {
+                    "type": "string"
+                  }
+                }
               }
             ]
           }

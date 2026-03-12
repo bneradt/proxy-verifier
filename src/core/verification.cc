@@ -717,6 +717,18 @@ EqualityCheck::test(TextView key, TextView name, TextView value) const
 }
 
 bool
+EqualityCheck::matches(TextView name, TextView value) const
+{
+  if (name.empty()) {
+    return invert_if_applicable(false);
+  }
+  if ((!_is_nocase && strcmp(value, _value)) || (_is_nocase && strcasecmp(value, _value))) {
+    return invert_if_applicable(false);
+  }
+  return invert_if_applicable(true);
+}
+
+bool
 EqualityCheck::test(TextView key, TextView name, std::vector<TextView> const &values) const
 {
   Errata errata;
@@ -830,6 +842,15 @@ PresenceCheck::test(TextView key, TextView name, TextView value) const
 }
 
 bool
+PresenceCheck::matches(TextView name, TextView /* value */) const
+{
+  if (name.empty()) {
+    return invert_if_applicable(false);
+  }
+  return invert_if_applicable(true);
+}
+
+bool
 PresenceCheck::test(TextView key, TextView name, std::vector<TextView> const &values) const
 {
   Errata errata;
@@ -887,6 +908,15 @@ AbsenceCheck::test(TextView key, TextView name, TextView value) const
 }
 
 bool
+AbsenceCheck::matches(TextView name, TextView /* value */) const
+{
+  if (!name.empty()) {
+    return invert_if_applicable(false);
+  }
+  return invert_if_applicable(true);
+}
+
+bool
 AbsenceCheck::test(TextView key, TextView name, std::vector<TextView> const &values) const
 {
   Errata errata;
@@ -920,39 +950,43 @@ bool
 SubstrCheck::test(TextView key, TextView name, TextView value) const
 {
   Errata errata;
+  auto const required_value_label = _is_inverted ? "Required Missing Value" : "Required Value";
   if (name.empty()) {
     errata.note(
         S_INFO,
-        R"({}{} {}: Absent. Key: "{}", {}: "{}", Required Value: "{}")",
+        R"({}{} {}: Absent. Key: "{}", {}: "{}", {}: "{}")",
         get_subtype(),
         get_test_name(),
         invert_result(false),
         key,
         target_type(),
         _name,
+        required_value_label,
         _value);
   } else if (test_tv(value, _value)) {
     errata.note(
         S_INFO,
-        R"({}{} {}: Not Found. Key: "{}", {}: "{}", Required Value: "{}", Actual Value: "{}")",
+        R"({}{} {}: Not Found. Key: "{}", {}: "{}", {}: "{}", Actual Value: "{}")",
         get_subtype(),
         get_test_name(),
         invert_result(false),
         key,
         target_type(),
         _name,
+        required_value_label,
         _value,
         value);
   } else {
     errata.note(
         S_INFO,
-        R"({}{} {}: Key: "{}", {}: "{}", Required Value: "{}", Value: "{}")",
+        R"({}{} {}: Key: "{}", {}: "{}", {}: "{}", Value: "{}")",
         get_subtype(),
         get_test_name(),
         invert_result(true),
         key,
         target_type(),
         _name,
+        required_value_label,
         _value,
         value);
     return invert_if_applicable(true);
@@ -961,11 +995,24 @@ SubstrCheck::test(TextView key, TextView name, TextView value) const
 }
 
 bool
+SubstrCheck::matches(TextView name, TextView value) const
+{
+  if (name.empty()) {
+    return invert_if_applicable(false);
+  }
+  if (test_tv(value, _value)) {
+    return invert_if_applicable(false);
+  }
+  return invert_if_applicable(true);
+}
+
+bool
 SubstrCheck::test(TextView key, TextView name, std::vector<TextView> const &values) const
 {
   Errata errata;
   auto is_includes_test =
       strcasecmp(get_test_name(), TextView(VERIFICATION_DIRECTIVE_INCLUDES)) == 0;
+  auto const required_values_label = _is_inverted ? "Required Missing Values:" : "Required Values:";
   if (name.empty() || (is_includes_test && values.size() < _values.size()) ||
       (!is_includes_test && values.size() != _values.size()))
   {
@@ -978,7 +1025,7 @@ SubstrCheck::test(TextView key, TextView name, std::vector<TextView> const &valu
         key,
         target_type(),
         _name);
-    message.print(R"(Required Values:)");
+    message.print("{}", required_values_label);
     for (auto const &value : _values) {
       message.print(R"( "{}")", value);
     }
@@ -1011,7 +1058,7 @@ SubstrCheck::test(TextView key, TextView name, std::vector<TextView> const &valu
               target_type(),
               _name);
 
-          message.print(R"(Required Values:)");
+          message.print("{}", required_values_label);
           for (auto const &value : _values) {
             message.print(R"( "{}")", value);
           }
@@ -1040,7 +1087,7 @@ SubstrCheck::test(TextView key, TextView name, std::vector<TextView> const &valu
             target_type(),
             _name);
 
-        message.print(R"(Required Values:)");
+        message.print("{}", required_values_label);
         for (auto const &value : _values) {
           message.print(R"( "{}")", value);
         }
@@ -1066,7 +1113,7 @@ SubstrCheck::test(TextView key, TextView name, std::vector<TextView> const &valu
       target_type(),
       _name);
 
-  message.print(R"(Required Values:)");
+  message.print("{}", required_values_label);
   for (auto const &value : _values) {
     message.print(R"( "{}")", value);
   }

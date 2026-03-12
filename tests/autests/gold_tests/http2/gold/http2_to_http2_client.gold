@@ -57,8 +57,8 @@ uuid: 5
 
 ``Equals Success: Key: "1", Field Name: ":status", Value: "200"
 ``Equals Success: Key: "1", Field Name: "content-length", Value: "16"
-``Equals Success: Key: "1", Field Name: "x-test-duplicate-combined", Values: "one" "two"
-``Equals Success: Key: "1", Field Name: "x-test-duplicate-separate", Values: "one" "two"
+``Equals Success: Key: "1", Field Name: "x-test-duplicate-combined", Value: "one, two"
+``Equals Success: Key: "1", Field Name: "x-test-duplicate-separate", Value: "one, two"
 ``Received an HTTP/2 response for key 1 with stream id 1:
 :status: 200
 cache-control: private

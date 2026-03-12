@@ -265,8 +265,39 @@ class HttpFields
 public:
   HttpFields();
 
+  enum class SetCookieRuleMode {
+    ConsumeMatch, ///< Match one received Set-Cookie line and consume it.
+    AssertNoMatch ///< Assert that no received Set-Cookie line matches.
+  };
+
+  struct SetCookieRule
+  {
+    SetCookieRule() = default;
+
+    SetCookieRule(std::shared_ptr<RuleCheck> rule_check) : rule_check(std::move(rule_check))
+    {
+      match_check = this->rule_check;
+    }
+
+    SetCookieRule(
+        std::shared_ptr<RuleCheck> rule_check,
+        std::shared_ptr<RuleCheck> match_check,
+        SetCookieRuleMode mode)
+      : rule_check(std::move(rule_check))
+      , match_check(std::move(match_check))
+      , mode(mode)
+    {
+    }
+
+    std::shared_ptr<RuleCheck> rule_check;  ///< Rule used for user-visible diagnostics.
+    std::shared_ptr<RuleCheck> match_check; ///< Rule used to match a received Set-Cookie line.
+    SetCookieRuleMode mode = SetCookieRuleMode::ConsumeMatch;
+  };
+
   Rules _rules;   ///< Maps field names to functors.
   Fields _fields; ///< Maps field names to values.
+  std::vector<SetCookieRule>
+      _set_cookie_rules; ///< Verification rules for individual Set-Cookie field lines.
 
   /** The ordered set of fields in which the request or response fields should
    * be sent as specifed by the YAML replay file, or the ordered fields in the
@@ -331,6 +362,11 @@ public:
   bool verify(swoc::TextView transaction_key, HttpFields const &rules_) const;
 
   friend class HttpHeader;
+
+private:
+  std::vector<swoc::TextView> values_for(swoc::TextView name) const;
+  static std::string combine_field_values(std::vector<swoc::TextView> const &values);
+  bool verify_set_cookie_rules(swoc::TextView transaction_key, HttpFields const &rules_) const;
 };
 
 /// An enumeration of the various protocol types.
@@ -357,6 +393,7 @@ public:
   /// Important header fields.
   /// @{
   static constexpr swoc::TextView FIELD_CONTENT_LENGTH = "content-length";
+  static constexpr swoc::TextView FIELD_SET_COOKIE = "set-cookie";
   static constexpr swoc::TextView FIELD_TRANSFER_ENCODING = "transfer-encoding";
   /// @}
 

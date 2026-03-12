@@ -76,6 +76,7 @@ static const std::string YAML_ERROR_CODE_KEY{"error-code"};
 static const std::string YAML_HDR_KEY{"headers"};
 static const std::string YAML_TRAILER_KEY{"trailers"};
 static const std::string YAML_FIELDS_KEY{"fields"};
+static const std::string YAML_SET_COOKIE_VERIFICATIONS_KEY{"set-cookie-verifications"};
 static const std::string YAML_HTTP_STATUS_KEY{"status"};
 static const std::string YAML_HTTP_REASON_KEY{"reason"};
 static const std::string YAML_HTTP_METHOD_KEY{"method"};

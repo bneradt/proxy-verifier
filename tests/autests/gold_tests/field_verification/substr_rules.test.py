@@ -3,7 +3,7 @@ Verify correct field verification behavior for contains, prefix, and suffix.
 '''
 # @file
 #
-# Copyright 2021, Verizon Media
+# Copyright 2026, Verizon Media
 # SPDX-License-Identifier: Apache-2.0
 #
 
@@ -68,51 +68,39 @@ client.ReturnCode = 1
 server.ReturnCode = 1
 
 #
-# Test 2: Verify duplicate field verification in a YAML replay file.
+# Test 2: Verify substring rules run against the RFC-combined value for repeated field lines.
 #
-r = Test.AddTestRun("Verify field verification works for HTTP transaction with duplicate fields")
+r = Test.AddTestRun("Verify substring field verification works for repeated RFC-combinable fields")
 client = r.AddClientProcess("client2", "replay_files/substr_rules_duplicate.yaml")
 server = r.AddServerProcess("server2", "replay_files/substr_rules_duplicate.yaml")
 proxy = r.AddProxyProcess("proxy2", listen_port=client.Variables.http_port,
                           server_port=server.Variables.http_port)
 
-client.Streams.stdout += Testers.ContainsExpression(
-    'Contains Violation: Absent/Mismatched. Key: "1", Field Name: "set-cookie", Required Values: "AB", Received Values: "ABCD" "EFG"',
-    'Validation should be complain that "Set-Cookie" had too many values.')
+server.Streams.stdout += Testers.ContainsExpression(
+    'Contains Success: Key: "1", Field Name: "x-test-contains", Required Value: "alpha, beta", Value: "alpha, beta"',
+    'Validation should be happy that repeated field lines are combined before contains checks.')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Prefix Violation: Absent/Mismatched. Key: "1", Field Name: "pref-cookie", Required Values: "AB" "EF", Received Values: "ABCD"',
-    'Validation should be complain that "Set-Cookie" had too few values.')
+    'Contains Violation: Not Found. Key: "1", Field Name: "x-test-contains", Required Value: "gamma", Actual Value: "alpha, beta"',
+    'Validation should complain that the combined field value does not contain "gamma".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Suffix Violation: Absent/Mismatched. Key: "1", Field Name: "suff-cookie", Required Values: "AB" "EF", Received Values:',
-    'Validation should complain that "Set-Cookie" had no values.')
+    'Prefix Success: Key: "1", Field Name: "x-test-prefix", Required Value: "start, e", Value: "start, end"',
+    'Validation should be happy that prefix checks use the combined field value.')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Contains Violation: Not Found. Key: "1", Field Name: "set-cookie", Required Values: "G" "F", Received Values: "ABCD" "EFG"',
-    'Validation should be complain that "Set-Cookie" had uncontained values.')
-
-client.Streams.stdout += Testers.ContainsExpression(
-    'Prefix Violation: Not Found. Key: "1", Field Name: "set-cookie", Required Values: "BC" "EF", Received Values: "ABCD" "EFG"',
-    'Validation should be complain that "Set-Cookie" did not match all prefixes.')
+    'Prefix Violation: Not Found. Key: "1", Field Name: "x-test-prefix", Required Value: "end", Actual Value: "start, end"',
+    'Validation should complain that the combined field value does not begin with "end".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Suffix Violation: Not Found. Key: "1", Field Name: "set-cookie", Required Values: "AB" "G", Received Values: "ABCD" "EFG"',
-    'Validation should complain that "Set-Cookie" did not match all suffixes.')
+    'Suffix Success: Key: "1", Field Name: "x-test-suffix", Required Value: "right", Value: "left, right"',
+    'Validation should be happy that suffix checks use the combined field value.')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Contains Success: Key: "1", Field Name: "set-cookie", Required Values: "AB" "E", Received Values: "ABCD" "EFG"',
-    'Validation should be happy that "Set-Cookie" matched all values.')
+    'Suffix Violation: Not Found. Key: "1", Field Name: "x-test-suffix", Required Value: "left", Actual Value: "left, right"',
+    'Validation should complain that the combined field value does not end with "left".')
 
-server.Streams.stdout += Testers.ContainsExpression(
-    'Prefix Success: Key: "1", Field Name: "set-cookie", Required Values: "A" "EFG", Received Values: "ABCD" "EFG"',
-    'Validation should be happy that "Set-Cookie" matched all prefixes.')
-
-client.Streams.stdout += Testers.ContainsExpression(
-    'Suffix Success: Key: "1", Field Name: "set-cookie", Required Values: "ABCD" "EFG", Received Values: "ABCD" "EFG"',
-    'Validation should be happy that "Set-Cookie" matched all suffixes.')
-
-client.ReturnCode = 1
+client.ReturnCode = 0
 server.ReturnCode = 1
 
 #

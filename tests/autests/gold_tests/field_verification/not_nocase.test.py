@@ -38,19 +38,19 @@ server.Streams.stdout += Testers.ContainsExpression(
     'Validation should be happy that "X-Test-Present" has a value.')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not Contains Success: Not Found. Key: "5", Field Name: "host", Required Value: "leo", Actual Value: "example.one"',
+    'Not Contains Success: Not Found. Key: "5", Field Name: "host", Required Missing Value: "leo", Actual Value: "example.one"',
     'Validation should be happy that "leo" is not contained in "example.one".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not Contains Success: Not Found. Key: "5", Field Name: "cookie", Required Value: "12345678", Actual Value: "foo=bar"',
+    'Not Contains Success: Not Found. Key: "5", Field Name: "cookie", Required Missing Value: "12345678", Actual Value: "foo=bar"',
     'Validation should be happy that a longer required substring is treated as not found.')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not Prefix Success: Not Found. Key: "5", Field Name: "x-test-request", Required Value: "equ", Actual Value: "RequestData"',
+    'Not Prefix Success: Not Found. Key: "5", Field Name: "x-test-request", Required Missing Value: "equ", Actual Value: "RequestData"',
     'Validation should be happy that "equ" does not prefix "RequestData".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not Suffix Success: Not Found. Key: "5", Field Name: "x-test-present", Required Value: "It\'s", Actual Value: "It\'s there"',
+    'Not Suffix Success: Not Found. Key: "5", Field Name: "x-test-present", Required Missing Value: "It\'s", Actual Value: "It\'s there"',
     'Validation should be happy that "It\'s" does not suffix "It\'s there".')
 
 server.Streams.stdout += Testers.ContainsExpression(
@@ -74,15 +74,15 @@ server.Streams.stdout += Testers.ContainsExpression(
     'Validation should be happy that "le.on" does not nocase equal "example.one".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Contains Success: Not Found. Key: "5", Field Name: "host", Required Value: "U", Actual Value: "example.one"',
+    'Not No Case Contains Success: Not Found. Key: "5", Field Name: "host", Required Missing Value: "U", Actual Value: "example.one"',
     'Validation should be happy that "leo" is not nocase contained in "example.one".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Prefix Success: Not Found. Key: "5", Field Name: "x-test-request", Required Value: "EQU", Actual Value: "RequestData"',
+    'Not No Case Prefix Success: Not Found. Key: "5", Field Name: "x-test-request", Required Missing Value: "EQU", Actual Value: "RequestData"',
     'Validation should be happy that "equ" does not nocase prefix "RequestData".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Suffix Success: Not Found. Key: "5", Field Name: "x-test-present", Required Value: "hre", Actual Value: "It\'s there"',
+    'Not No Case Suffix Success: Not Found. Key: "5", Field Name: "x-test-present", Required Missing Value: "hre", Actual Value: "It\'s there"',
     'Validation should be happy that "hre" does not nocase suffix "It\'s there".')
 
 server.Streams.stdout += Testers.ContainsExpression(
@@ -98,15 +98,15 @@ server.Streams.stdout += Testers.ContainsExpression(
     'Validation should complain that "X-Test-Absent" has no value.')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not Contains Violation: Key: "5", Field Name: "host", Required Value: "le.on", Value: "example.one"',
+    'Not Contains Violation: Key: "5", Field Name: "host", Required Missing Value: "le.on", Value: "example.one"',
     'Validation should complain that "le.on" is contained in "example.one".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not Prefix Violation: Key: "5", Field Name: "x-test-request", Required Value: "Req", Value: "RequestData"',
+    'Not Prefix Violation: Key: "5", Field Name: "x-test-request", Required Missing Value: "Req", Value: "RequestData"',
     'Validation should complain that "Req" prefixes "RequestData".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not Suffix Violation: Key: "5", Field Name: "x-test-present", Required Value: "there", Value: "It\'s there"',
+    'Not Suffix Violation: Key: "5", Field Name: "x-test-present", Required Missing Value: "there", Value: "It\'s there"',
     'Validation should complain that "there" suffixes "It\'s there".')
 
 server.Streams.stdout += Testers.ContainsExpression(
@@ -130,19 +130,19 @@ server.Streams.stdout += Testers.ContainsExpression(
     'Validation should complain that "Example.one" nocase equals "example.one".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Contains Violation: Key: "5", Field Name: "host", Required Value: "le.oN", Value: "example.one"',
+    'Not No Case Contains Violation: Key: "5", Field Name: "host", Required Missing Value: "le.oN", Value: "example.one"',
     'Validation should complain that "le.oN" is nocase contained in "example.one".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Prefix Violation: Key: "5", Field Name: "x-test-request", Required Value: "req", Value: "RequestData"',
+    'Not No Case Prefix Violation: Key: "5", Field Name: "x-test-request", Required Missing Value: "req", Value: "RequestData"',
     'Validation should complain that "req" nocase prefixes "RequestData".')
 
 server.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Suffix Violation: Key: "5", Field Name: "x-test-present", Required Value: "eRE", Value: "It\'s there"',
+    'Not No Case Suffix Violation: Key: "5", Field Name: "x-test-present", Required Missing Value: "eRE", Value: "It\'s there"',
     'Validation should complain that "eRE" nocase suffixes "It\'s there".')
 
 server.Streams.stdout = Testers.ContainsExpression(
-    'Not No Case Contains Violation: Key: "5", URI Part: "path", Required Value: "iG/S", Value: "/config/settings.yaml"',
+    'Not No Case Contains Violation: Key: "5", URI Part: "path", Required Missing Value: "iG/S", Value: "/config/settings.yaml"',
     'Validation should complain that "iG/S" is nocase contained in the path.')
 
 client.Streams.stdout += Testers.ContainsExpression(
@@ -158,11 +158,11 @@ client.Streams.stdout += Testers.ContainsExpression(
     'Validation should complain that "fake-cookie" is absent.')
 
 client.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Contains Violation: Key: "5", Field Name: "content-type", Required Value: "Tex", Value: "text/html"',
+    'Not No Case Contains Violation: Key: "5", Field Name: "content-type", Required Missing Value: "Tex", Value: "text/html"',
     'Validation should complain that "Tex" is nocase contained in "text/html".')
 
 client.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Prefix Success: Absent. Key: "5", Field Name: "fake-cookie", Required Value: "B"',
+    'Not No Case Prefix Success: Absent. Key: "5", Field Name: "fake-cookie", Required Missing Value: "B"',
     'Validation should be happy that "B" does not nocase prefix a nonexistent header.')
 
 client.Streams.stdout += Testers.ContainsExpression(
@@ -170,12 +170,12 @@ client.Streams.stdout += Testers.ContainsExpression(
     'Validation should be happy that "L" nocase suffixes "text/html".')
 
 client.Streams.stdout += Testers.ContainsExpression(
-    'Not Prefix Success: Not Found. Key: "5", Field Name: "multiple", Required Values: "Abc" "DEF", Received Values: "abc" "DEF"',
+    'Not Prefix Success: Not Found. Key: "5", Field Name: "multiple", Required Missing Value: "Abc, DEF", Actual Value: "abc, DEF"',
     'Validation should be happy that "Abc" does not prefix "abc", even though "DEF" prefixes "DEF".'
 )
 
 client.Streams.stdout += Testers.ContainsExpression(
-    'Not No Case Equals Violation: Key: "5", Field Name: "multiple", Required Values: "Abc" "DEF", Values: "abc" "DEF"',
+    'Not No Case Equals Violation: Key: "5", Field Name: "multiple", Required Value: "Abc, DEF", Value: "abc, DEF"',
     'Validation should complain that each required value nocase equals the corresponding received value.'
 )
 

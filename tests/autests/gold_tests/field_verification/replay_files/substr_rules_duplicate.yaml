@@ -3,7 +3,6 @@ meta:
 
 sessions:
 - transactions:
-
   - client-request:
       version: "1.1"
       method: "GET"
@@ -11,20 +10,24 @@ sessions:
       headers:
         fields:
         - [ Host, example.one ]
-        - [ Set-Cookie, [ ABCD, EFG ] ]
-        - [ Pref-Cookie, [ ABCD ] ]
+        - [ X-Test-Contains, alpha ]
+        - [ X-Test-Contains, beta ]
+        - [ X-Test-Prefix, start ]
+        - [ X-Test-Prefix, end ]
+        - [ X-Test-Suffix, left ]
+        - [ X-Test-Suffix, right ]
         - [ uuid, 1 ]
 
     proxy-request:
       headers:
         fields:
         - [ Host, example.one ]
-        - [ Pref-Cookie, { value: [ AB, EF ], as: prefix } ]
-        - [ Suff-Cookie, { value: [ AB, EF ], as: suffix } ]
-        - [ Set-Cookie, { value: [ G, F ], as: contains } ]
-        - [ Set-Cookie, { value: [ AB, G ], as: suffix } ]
-        - [ Set-Cookie, { value: [ AB, E ], as: contains } ]
-        - [ Set-Cookie, { value: [ A, EFG ], as: prefix } ]
+        - [ X-Test-Contains, { value: "alpha, beta", as: contains } ]
+        - [ X-Test-Contains, { value: gamma, as: contains } ]
+        - [ X-Test-Prefix, { value: "start, e", as: prefix } ]
+        - [ X-Test-Prefix, { value: end, as: prefix } ]
+        - [ X-Test-Suffix, { value: right, as: suffix } ]
+        - [ X-Test-Suffix, { value: left, as: suffix } ]
 
     server-response:
       status: 200
@@ -35,12 +38,3 @@ sessions:
         fields:
         - [ Content-Type, text/html ]
         - [ Content-Length, 16 ]
-        - [ Set-Cookie, [ ABCD, EFG ] ]
-
-    proxy-response:
-      status: 200
-      headers:
-        fields:
-        - [ Set-Cookie, { value: [ AB ], as: contains } ]
-        - [ Set-Cookie, { value: [ BC, EF ], as: prefix } ]
-        - [ Set-Cookie, { value: [ ABCD, EFG ], as: suffix } ]

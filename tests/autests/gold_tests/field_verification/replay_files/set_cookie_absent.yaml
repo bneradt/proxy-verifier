@@ -32,8 +32,6 @@ sessions:
         - [:status, 200]
         - [Content-Type, text/html]
         - [Content-Length, '11']
-        - [Set-Cookie, "A1=111"]
-        - [Set-Cookie, "B1=333"]
       content:
         encoding: plain
         data: server_test
@@ -41,6 +39,5 @@ sessions:
 
     proxy-response:
       headers:
-        set-cookie-verifications:
-        - B1=333
-        - A1=111
+        fields:
+        - [Set-Cookie, { as: absent }]

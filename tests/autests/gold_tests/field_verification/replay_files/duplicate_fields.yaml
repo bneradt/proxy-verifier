@@ -3,7 +3,6 @@ meta:
 
 sessions:
 - transactions:
-
   - client-request:
       version: "1.1"
       method: "GET"
@@ -11,21 +10,19 @@ sessions:
       headers:
         fields:
         - [ Host, example.one ]
-        - [ X-Test-Request, [ first_data, second_data ] ]
-        - [ X-Test-Present, [ also, here ] ]
-        - [ X-Test-Equal, [ theSe, thE, values ] ]
-        - [ X-Test-Another, [ sOme, valuEs ] ]
+        - [ X-Join, alpha ]
+        - [ X-Join, beta ]
         - [ uuid, 1 ]
 
     proxy-request:
       headers:
         fields:
         - [ Host, example.one ]
-        - [ X-Test-Request, { value: [ second_data, first_data ], as: equal } ]
-        - [ X-Test-Present, { value: [ alsohere ], as: absent } ]
-        - [ X-Test-Equal, { value: [ theSe, thE, values ], as: equal } ]
-        # Verify we support the old sequence, as opposed to map, syntax.
-        - [ X-Test-Another, [ who, cares ], present ]
+        # This passes because the expected order matches the received order.
+        - [ X-Join, { value: [ alpha, beta ], as: equal } ]
+        # This intentionally fails because order matters for combined field values.
+        - [ X-Join, { value: [ beta, alpha ], as: equal } ]
+        - [ X-Join, { value: beta, as: contains } ]
 
     server-response:
       status: 200
@@ -36,14 +33,16 @@ sessions:
         fields:
         - [ Content-Type, text/html ]
         - [ Content-Length, 16 ]
-        - [ Set-Cookie, [ ABCD, EFG ] ]
+        - [ Cache-Control, no-store ]
+        - [ Cache-Control, max-age=0 ]
+        - [ Vary, "accept-encoding, accept-language" ]
 
     proxy-response:
       status: 200
       headers:
         fields:
-        - [ Content-Type, text/html ]
-        - [ Content-Length, 16 ]
-        - [ Set-Cookie, { value: [ ABCD ], as: equal } ]
-        - [ X-Not-A-Header, { value: [ not, here ], as: absent } ]
-        - [ X-Does-Not-Exist, { value: [ also, not, here ], as: present } ]
+        # This passes because the expected order matches the received order.
+        - [ Cache-Control, { value: [ no-store, max-age=0 ], as: equal } ]
+        # This intentionally fails because order matters for combined field values.
+        - [ Cache-Control, { value: [ max-age=0, no-store ], as: equal } ]
+        - [ Vary, { value: [ accept-encoding, accept-language ], as: equal } ]
