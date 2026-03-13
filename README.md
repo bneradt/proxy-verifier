@@ -1110,7 +1110,6 @@ equal      |  The presence of a field with the specified field name and a value 
 contains   |  The presence of a field with the specified name with a value *containing* the specified value.
 prefix     |  The presence of a field with the specified name with a value *prefixed* with the specified value.
 suffix     |  The presence of a field with the specified name with a value *suffixed* with the specified value.
-includes   |  Helpful for multi-value fields. Specifies that the set of value strings exist in the header field values for a particular header name in any order. Note that each value is matched against the set like ``contains``, so each value is a substring match.
 
 For all of these field verification behaviors, field names are matched case
 insensitively while field values are matched case sensitively.
@@ -1181,12 +1180,6 @@ The following demonstrates the `suffix` directive which specifies that `X-Forwar
   - [ X-Forwarded-For, { value: 2, as: suffix } ]
 ```
 
-The following demonstrates the `includes` directive which specifies that `Set-Cookie` should have been received from the proxy including the values "A" and "B" at any position in the field value:
-
-```YAML
-  - [ Set-Cookie, { value: [A, B] , as: includes } ]
-```
-
 Proxy Verifier supports inverting the result of any rule by using `not` instead of `as`. The following demonstrates the `prefix` directive which specifies that `X-Forwarded-For` should have been received from the proxy with a field value not starting with "a":
 
 ```YAML
@@ -1217,41 +1210,63 @@ proxy-response:
     - [ x-test-trailer-2, { value: two, as: equal } ]
 ```
 
-To perform multi-value field verification, a specific format must be adhered to.
-This format involves specifying each value within a sequence, ensuring that each
-value is individually verified according to the defined rules.
+Per [RFC 9110 section 5.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-5.3),
+Proxy Verifier supports repeated ordinary HTTP fields by combining their values
+with `", "` in the order they were received before applying the verification
+rule. Order therefore matters for repeated field lines that can be legally
+combined.
 
-Be aware that field verification is order sensitive. That is, the field values
-will be verified in the order that they are specified in the verification rule.
-
-See example below, value `B1` and `B2` are specified in the same order in the
-header fields and verification rule:
+When a verification rule uses a sequence value for an ordinary field, Proxy
+Verifier applies the same RFC combination rule to the expected value. The two
+examples below are therefore equivalent:
 
 ```YAML
 server-response:
   headers:
     fields:
-    - [:status, 200]
-    - [Content-Type, text/html]
-    - [Content-Length, '11']
-    - [Set-Cookie, "A1=111"]
-    - [Set-Cookie, "A2=222"]
-    - [Set-Cookie, "B1=333"]
-  content:
-    encoding: plain
-    data: server_test
-    size: 11
+    - [Cache-Control, no-store]
+    - [Cache-Control, max-age=0]
 
 proxy-response:
   headers:
     fields:
-    - [Set-Cookie, { value: [A1=111, A2=222, B1=333] , as: equal }]
+    - [Cache-Control, { value: [no-store, max-age=0], as: equal }]
 ```
 
-There is an exception for the `includes` check, where it is not order sensitive.
-See exammple below:
+```YAML
+server-response:
+  headers:
+    fields:
+    - [Vary, "accept-encoding, accept-language"]
+
+proxy-response:
+  headers:
+    fields:
+    - [Vary, { value: [accept-encoding, accept-language], as: equal }]
+```
+
+`Set-Cookie` is the exception called out by
+[RFC 9110 section 5.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-5.3).
+Because `Set-Cookie` field lines are not combined into a comma-separated list,
+Proxy Verifier provides a separate `set-cookie-verifications` node for them.
+Positive entries in `set-cookie-verifications` are matched against the
+received `Set-Cookie` lines without requiring a specific order. Each received
+`Set-Cookie` line can satisfy at most one positive entry. Any additional
+received `Set-Cookie` lines after the listed positive rules are ignored.
+
+Negative entries such as `{ as: absent }`, `{ not: equal }`, or
+`{ not: contains }` do not consume a received `Set-Cookie` line. They assert
+that no received `Set-Cookie` line matches that rule. Within
+`set-cookie-verifications`, a `value` array expands to multiple independent
+checks of the same rule. For `Set-Cookie`, `{ as: absent }` without a `value`
+asserts that no `Set-Cookie` field lines are present at all, while
+`{ as: absent, value: ... }` asserts that no received `Set-Cookie` line
+contains that value. The legacy `fields` syntax still supports
+`- [Set-Cookie, { as: absent }]` for the no-`Set-Cookie` case.
 
 ```YAML
+# Example: positive Set-Cookie checks match individual cookie lines in any
+# order, one received line per positive rule.
 server-response:
   headers:
     fields:
@@ -1259,22 +1274,40 @@ server-response:
     - [Content-Type, text/html]
     - [Content-Length, '11']
     - [Set-Cookie, "A1=111"]
-    - [Set-Cookie, "A2=222"]
     - [Set-Cookie, "B1=333"]
-    - [Set-Cookie, "B2=444"]
     - [Set-Cookie, "C1=555"]
-    - [Set-Cookie, "C2=666"]
-    - [Set-Cookie, "D1=777"]
-    - [Set-Cookie, "D2=888"]
-  content:
-    encoding: plain
-    data: server_test
-    size: 11
 
 proxy-response:
   headers:
+    set-cookie-verifications:
+    - { value: A1=, as: contains }
+    - { value: B1=333, as: equal }
+
+# Example: a value array expands into multiple independent positive checks.
+proxy-response:
+  headers:
+    set-cookie-verifications:
+    - { value: [A1=, A3=, A1S], as: contains }
+
+# Example: absent with a value asserts that no received Set-Cookie line
+# contains that value. An array expands into multiple negative checks.
+proxy-response:
+  headers:
+    set-cookie-verifications:
+    - { value: [D1=, _ebd], as: absent }
+
+# Example: absent without a value asserts that there are no Set-Cookie lines
+# at all in the received message.
+proxy-response:
+  headers:
+    set-cookie-verifications:
+    - { as: absent }
+
+# Example: the legacy fields syntax still works for the no-Set-Cookie case.
+proxy-response:
+  headers:
     fields:
-    - [Set-Cookie, { value: [B2=, A2=, C2=, D1=, C1=] , as: includes }]
+    - [Set-Cookie, { as: absent }]
 ```
 
 ### URL Verification

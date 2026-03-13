@@ -148,83 +148,83 @@ TEST_CASE("RuleChecks of non-duplicate fields", "[RuleCheck]")
   // contains/prefix/suffix rule with blank value would be absurd, so skipped
 }
 
-TEST_CASE("RuleChecks of duplicate fields", "[RuleCheck]")
+TEST_CASE("HttpFields combine repeated RFC-combinable fields", "[HttpFields]")
 {
-  swoc::TextView test_name("testName");
-  std::vector<swoc::TextView> expected_values_arg{
-      "first_value",
-      "second_value",
-  };
-  std::vector<swoc::TextView> expected_values{
-      "first_value",
-      "second_value",
-  };
-  swoc::TextView empty_name;
-  std::vector<swoc::TextView> empty_values_arg;
-  std::vector<swoc::TextView> empty_values;
-
   RuleCheck::options_init();
 
-  SECTION("presence checks")
-  {
-    std::shared_ptr<RuleCheck> present_check =
-        RuleCheck::make_rule_check(test_name, std::move(expected_values_arg), "present");
-    REQUIRE(present_check);
+  HttpFields repeated_actual;
+  repeated_actual.add_field("cache-control", "no-store");
+  repeated_actual.add_field("cache-control", "max-age=0");
 
-    CHECK_FALSE(present_check->test(key, empty_name, empty_values));
-    CHECK_FALSE(present_check->test(key, empty_name, expected_values));
-    CHECK(present_check->test(key, test_name, empty_values));
-    CHECK(present_check->test(key, test_name, expected_values));
-    CHECK(present_check->test(key, test_name, {"some", "non-test", "values"}));
-  }
+  HttpFields combined_actual;
+  combined_actual.add_field("cache-control", "no-store, max-age=0");
 
-  SECTION("absence checks")
-  {
-    std::shared_ptr<RuleCheck> absent_check =
-        RuleCheck::make_rule_check(test_name, std::move(expected_values_arg), "absent");
-    REQUIRE(absent_check);
+  HttpFields success_rules;
+  success_rules._rules.emplace(
+      "cache-control",
+      RuleCheck::make_rule_check("cache-control", "no-store, max-age=0", "equal"));
+  success_rules._rules.emplace(
+      "cache-control",
+      RuleCheck::make_rule_check("cache-control", "max-age=0", "contains"));
 
-    CHECK(absent_check->test(key, empty_name, empty_values));
-    CHECK(absent_check->test(key, empty_name, expected_values));
-    CHECK_FALSE(absent_check->test(key, test_name, empty_values));
-    CHECK_FALSE(absent_check->test(key, test_name, expected_values));
-  }
+  CHECK_FALSE(repeated_actual.verify(key, success_rules));
+  CHECK_FALSE(combined_actual.verify(key, success_rules));
 
-  SECTION("equal checks")
-  {
-    std::shared_ptr<RuleCheck> equal_check_not_blank =
-        RuleCheck::make_rule_check(test_name, std::move(expected_values_arg), "equal");
-    REQUIRE(equal_check_not_blank);
+  HttpFields order_rules;
+  order_rules._rules.emplace(
+      "cache-control",
+      RuleCheck::make_rule_check("cache-control", "max-age=0, no-store", "equal"));
+  CHECK(repeated_actual.verify(key, order_rules));
+}
 
-    CHECK_FALSE(equal_check_not_blank->test(key, empty_name, empty_values));
-    CHECK_FALSE(equal_check_not_blank->test(key, empty_name, expected_values));
-    CHECK_FALSE(equal_check_not_blank->test(key, test_name, empty_values));
-    CHECK(equal_check_not_blank->test(key, test_name, expected_values));
+TEST_CASE("HttpFields verify Set-Cookie rules separately", "[HttpFields]")
+{
+  RuleCheck::options_init();
 
-    // Subsets of the expected values are not enough.
-    std::vector<swoc::TextView> subset_values{
-        "first_value",
-    };
-    CHECK_FALSE(equal_check_not_blank->test(key, test_name, subset_values));
+  HttpFields actual;
+  actual.add_field("set-cookie", "A1=111");
+  actual.add_field("set-cookie", "B1=222");
+  actual.add_field("set-cookie", "C1=333");
 
-    // Order matters.
-    std::vector<swoc::TextView> re_arranged_values{
-        "second_value",
-        "first_value",
-    };
-    CHECK_FALSE(equal_check_not_blank->test(key, test_name, re_arranged_values));
-  }
+  HttpFields success_rules;
+  success_rules._set_cookie_rules.push_back(
+      RuleCheck::make_rule_check("set-cookie", "A1=", "contains"));
+  success_rules._set_cookie_rules.push_back(
+      RuleCheck::make_rule_check("set-cookie", "B1=222", "equal"));
 
-  SECTION("equal checks with no values in the rule")
-  {
-    std::shared_ptr<RuleCheck> equal_check_blank =
-        RuleCheck::make_rule_check(test_name, std::move(empty_values_arg), "equal");
-    REQUIRE(equal_check_blank);
+  CHECK_FALSE(actual.verify(key, success_rules));
 
-    std::vector<swoc::TextView> non_empty_values{"some_value"};
-    CHECK_FALSE(equal_check_blank->test(key, empty_name, empty_values));
-    CHECK_FALSE(equal_check_blank->test(key, empty_name, non_empty_values));
-    CHECK(equal_check_blank->test(key, test_name, empty_values));
-    CHECK_FALSE(equal_check_blank->test(key, test_name, non_empty_values));
-  }
+  HttpFields reordered_rules;
+  reordered_rules._set_cookie_rules.push_back(
+      RuleCheck::make_rule_check("set-cookie", "B1=222", "equal"));
+  reordered_rules._set_cookie_rules.push_back(
+      RuleCheck::make_rule_check("set-cookie", "A1=111", "equal"));
+
+  CHECK_FALSE(actual.verify(key, reordered_rules));
+
+  HttpFields missing_rules;
+  missing_rules._set_cookie_rules.push_back(
+      RuleCheck::make_rule_check("set-cookie", "D1=444", "equal"));
+
+  CHECK(actual.verify(key, missing_rules));
+
+  HttpFields negative_rules;
+  negative_rules._set_cookie_rules.push_back(
+      RuleCheck::make_rule_check("set-cookie", "A1=111", "equal"));
+  negative_rules._set_cookie_rules.emplace_back(
+      RuleCheck::make_rule_check("set-cookie", "B1=222", "contains", true),
+      RuleCheck::make_rule_check("set-cookie", "B1=222", "contains"),
+      HttpFields::SetCookieRuleMode::AssertNoMatch);
+
+  CHECK(actual.verify(key, negative_rules));
+
+  HttpFields no_cookie_actual;
+  HttpFields no_cookie_rules;
+  no_cookie_rules._set_cookie_rules.emplace_back(
+      RuleCheck::make_rule_check("set-cookie", "", "absent"),
+      RuleCheck::make_rule_check("set-cookie", "", "present"),
+      HttpFields::SetCookieRuleMode::AssertNoMatch);
+
+  CHECK_FALSE(no_cookie_actual.verify(key, no_cookie_rules));
+  CHECK(actual.verify(key, no_cookie_rules));
 }

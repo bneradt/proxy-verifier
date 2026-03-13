@@ -34,6 +34,7 @@ sessions:
         - [Content-Length, '11']
         - [Set-Cookie, "A1=111"]
         - [Set-Cookie, "B1=333"]
+        - [Set-Cookie, "A1S=555"]
       content:
         encoding: plain
         data: server_test
@@ -42,5 +43,5 @@ sessions:
     proxy-response:
       headers:
         set-cookie-verifications:
-        - B1=333
-        - A1=111
+        - { value: [A1=, A1S=], as: contains }
+        - { value: [D1=, _ebd], as: absent }

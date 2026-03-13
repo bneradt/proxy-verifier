@@ -9,10 +9,12 @@
 #include "core/verification.h"
 #include "core/ProxyVerifier.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cassert>
 #include <cstring>
 #include <cstdint>
+#include <optional>
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <netinet/tcp.h>
@@ -236,12 +238,18 @@ HttpFields::merge(HttpFields const &other)
   for (auto const &rule : other._rules) {
     _rules.emplace(rule.first, rule.second);
   }
+  for (auto const &rule : other._set_cookie_rules) {
+    _set_cookie_rules.push_back(rule);
+  }
 }
 
 bool
 HttpFields::has_rules() const
 {
   if (!_rules.empty()) {
+    return true;
+  }
+  if (!_set_cookie_rules.empty()) {
     return true;
   }
   for (auto const &url_rule_set : _url_rules) {
@@ -302,43 +310,44 @@ HttpFields::verify(swoc::TextView transaction_key, HttpFields const &rules_) con
   bool issue_exists = false;
   auto const &rules = rules_._rules;
   auto const *url_rules = rules_._url_rules;
-  auto const &fields = this->_fields;
   auto const *url_parts = this->_url_parts;
   for (auto const &[name, rule_check] : rules) {
-    auto name_range = fields.equal_range(name);
-    auto field_iter = name_range.first;
+    auto values = values_for(name);
     if (rule_check->expects_duplicate_fields()) {
-      if (field_iter == name_range.second) {
+      if (values.empty()) {
         if (!rule_check->test(transaction_key, swoc::TextView(), std::vector<TextView>{})) {
           // We supply the empty name and value for the absence check which
           // expects this to indicate an absent field.
           issue_exists = true;
         }
       } else {
-        std::vector<TextView> values;
-        while (field_iter != name_range.second) {
-          values.emplace_back(field_iter->second);
-          ++field_iter;
-        }
         if (!rule_check->test(transaction_key, name, values)) {
           issue_exists = true;
         }
       }
     } else {
-      if (field_iter == name_range.second) {
+      if (values.empty()) {
         if (!rule_check->test(transaction_key, swoc::TextView(), swoc::TextView())) {
           // We supply the empty name and value for the absence check which
           // expects this to indicate an absent field.
           issue_exists = true;
         }
       } else {
-        if (!rule_check
-                 ->test(transaction_key, field_iter->first, swoc::TextView(field_iter->second))) {
+        TextView actual_value;
+        std::string combined_value_storage;
+        if (values.size() == 1 || strcasecmp(name, HttpHeader::FIELD_SET_COOKIE) == 0) {
+          actual_value = values.front();
+        } else {
+          combined_value_storage = combine_field_values(values);
+          actual_value = combined_value_storage;
+        }
+        if (!rule_check->test(transaction_key, name, actual_value)) {
           issue_exists = true;
         }
       }
     }
   }
+  issue_exists |= verify_set_cookie_rules(transaction_key, rules_);
   for (std::size_t i = 0; i < URL_PART_NAMES.count(); ++i) {
     const std::vector<std::shared_ptr<RuleCheck>> &v = url_rules[i];
     for (size_t j = 0; j < v.size(); ++j) {
@@ -357,6 +366,118 @@ HttpFields::verify(swoc::TextView transaction_key, HttpFields const &rules_) con
         if (!rule_check->test(transaction_key, URL_PART_NAMES[static_cast<UrlPart>(i)], value)) {
           issue_exists = true;
         }
+      }
+    }
+  }
+  return issue_exists;
+}
+
+std::vector<TextView>
+HttpFields::values_for(swoc::TextView name) const
+{
+  std::vector<TextView> values;
+  for (auto const &[field_name, field_value] : _fields_sequence) {
+    if (strcasecmp(field_name, name) == 0) {
+      values.emplace_back(field_value);
+    }
+  }
+  return values;
+}
+
+std::string
+HttpFields::combine_field_values(std::vector<swoc::TextView> const &values)
+{
+  if (values.empty()) {
+    return {};
+  }
+
+  size_t joined_size = 0;
+  for (auto const &value : values) {
+    joined_size += value.size();
+  }
+  joined_size += 2 * (values.size() - 1);
+
+  std::string combined_value;
+  combined_value.reserve(joined_size);
+  bool first = true;
+  for (auto const &value : values) {
+    if (!first) {
+      combined_value.append(", ");
+    }
+    combined_value.append(value.data(), value.size());
+    first = false;
+  }
+  return combined_value;
+}
+
+bool
+HttpFields::verify_set_cookie_rules(swoc::TextView transaction_key, HttpFields const &rules_) const
+{
+  if (rules_._set_cookie_rules.empty()) {
+    return false;
+  }
+
+  bool issue_exists = false;
+  auto const values = values_for(HttpHeader::FIELD_SET_COOKIE);
+  std::vector<bool> matched_values(values.size(), false);
+
+  for (auto const &rule : rules_._set_cookie_rules) {
+    auto const &rule_check = rule.rule_check;
+    auto const &match_check = rule.match_check ? rule.match_check : rule.rule_check;
+
+    if (rule.mode == SetCookieRuleMode::AssertNoMatch) {
+      std::optional<size_t> violating_index;
+      for (size_t i = 0; i < values.size(); ++i) {
+        if (match_check->matches(HttpHeader::FIELD_SET_COOKIE, values[i])) {
+          violating_index = i;
+          break;
+        }
+      }
+
+      if (violating_index.has_value()) {
+        if (!rule_check
+                 ->test(transaction_key, HttpHeader::FIELD_SET_COOKIE, values[*violating_index])) {
+          issue_exists = true;
+        }
+      } else if (!rule_check->test(transaction_key, swoc::TextView(), swoc::TextView())) {
+        issue_exists = true;
+      }
+      continue;
+    }
+
+    std::optional<size_t> matched_index;
+    for (size_t i = 0; i < values.size(); ++i) {
+      if (matched_values[i]) {
+        continue;
+      }
+      if (match_check->matches(HttpHeader::FIELD_SET_COOKIE, values[i])) {
+        matched_index = i;
+        break;
+      }
+    }
+
+    if (matched_index.has_value()) {
+      matched_values[*matched_index] = true;
+      if (!rule_check->test(transaction_key, HttpHeader::FIELD_SET_COOKIE, values[*matched_index]))
+      {
+        issue_exists = true;
+      }
+      continue;
+    }
+
+    auto const unmatched_it = std::find(matched_values.begin(), matched_values.end(), false);
+    if (unmatched_it == matched_values.end()) {
+      if (!rule_check->test(transaction_key, swoc::TextView(), swoc::TextView())) {
+        issue_exists = true;
+      }
+    } else {
+      auto const unmatched_index = std::distance(matched_values.begin(), unmatched_it);
+      if (!rule_check->test(
+              transaction_key,
+              HttpHeader::FIELD_SET_COOKIE,
+              values[static_cast<size_t>(unmatched_index)]))
+      {
+        issue_exists = true;
       }
     }
   }

@@ -459,6 +459,15 @@ public:
   virtual bool test(swoc::TextView transaction_key, swoc::TextView name, swoc::TextView value)
       const = 0;
 
+  /** Test whether the provided name/value pair satisfies the rule without
+   * emitting diagnostics.
+   *
+   * This is used for matching one expected rule against multiple candidate
+   * values, such as Set-Cookie verification where the expected order is not
+   * significant.
+   */
+  virtual bool matches(swoc::TextView name, swoc::TextView value) const = 0;
+
   virtual bool test(
       swoc::TextView transaction_key,
       swoc::TextView name,
@@ -551,6 +560,8 @@ public:
    */
   bool test(swoc::TextView key, swoc::TextView name, swoc::TextView value) const override;
 
+  bool matches(swoc::TextView name, swoc::TextView value) const override;
+
   /** Test whether the name and values both match the expected name and values
    * per the values instantiated in construction.
    *
@@ -609,6 +620,8 @@ public:
    */
   bool test(swoc::TextView key, swoc::TextView name, swoc::TextView value) const override;
 
+  bool matches(swoc::TextView name, swoc::TextView value) const override;
+
   /**
    * @param values (unused) The valuas of the target field (null
    * if not found)
@@ -663,6 +676,8 @@ public:
    */
   bool test(swoc::TextView key, swoc::TextView name, swoc::TextView value) const override;
 
+  bool matches(swoc::TextView name, swoc::TextView value) const override;
+
   /**
    * @param values (unused) The value of the target field (null
    * if not found)
@@ -703,6 +718,8 @@ public:
    * @return Whether the check was successful or not
    */
   bool test(swoc::TextView key, swoc::TextView name, swoc::TextView value) const override;
+
+  bool matches(swoc::TextView name, swoc::TextView value) const override;
 
   /** Test whether the name matches the expected name and the values contain,
    * are prefixed with, or are suffixed with the expected values per the

@@ -40,6 +40,9 @@ using TimePoint = std::chrono::time_point<ClockType, nanoseconds>;
 
 namespace
 {
+static constexpr bool RULE_IS_CASE_INSENSITIVE = true;
+static constexpr bool RULE_IS_INVERTED = true;
+
 /** RAII for managing the handler's file. */
 struct HandlerOpener
 {
@@ -184,6 +187,186 @@ parser_thread(bool &shutdown_flag, ReadFileQueue &queue, YamlParser::loader_t &l
   while (!shutdown_flag && queue.pop(path, content)) {
     errata.note(loader(path, content));
   }
+  return errata;
+}
+
+std::string
+combine_field_values(std::vector<TextView> const &values)
+{
+  if (values.empty()) {
+    return {};
+  }
+
+  size_t joined_size = 0;
+  for (auto const &value : values) {
+    joined_size += value.size();
+  }
+  joined_size += 2 * (values.size() - 1);
+
+  std::string combined_value;
+  combined_value.reserve(joined_size);
+  bool first = true;
+  for (auto const &value : values) {
+    if (!first) {
+      combined_value.append(", ");
+    }
+    combined_value.append(value.data(), value.size());
+    first = false;
+  }
+  return combined_value;
+}
+
+Errata
+append_set_cookie_rule(
+    HttpFields &fields,
+    YAML::Mark const &mark,
+    std::vector<TextView> const &values,
+    TextView rule_type,
+    bool is_inverted,
+    bool is_nocase)
+{
+  Errata errata;
+
+  auto make_set_cookie_check = [&](TextView value,
+                                   TextView set_cookie_rule_type,
+                                   bool set_cookie_is_inverted) -> std::shared_ptr<RuleCheck> {
+    return RuleCheck::make_rule_check(
+        HttpHeader::FIELD_SET_COOKIE,
+        value,
+        set_cookie_rule_type,
+        set_cookie_is_inverted,
+        is_nocase);
+  };
+
+  auto append_rule = [&](TextView value, bool has_value) -> void {
+    TextView diagnostic_rule_type = rule_type;
+    bool diagnostic_is_inverted = is_inverted;
+    TextView match_rule_type = rule_type;
+    bool match_is_inverted = is_inverted;
+    auto mode = HttpFields::SetCookieRuleMode::ConsumeMatch;
+
+    if (!is_inverted && rule_type == VERIFICATION_DIRECTIVE_ABSENCE) {
+      mode = HttpFields::SetCookieRuleMode::AssertNoMatch;
+      if (has_value) {
+        diagnostic_rule_type = VERIFICATION_DIRECTIVE_CONTAINS;
+        diagnostic_is_inverted = RULE_IS_INVERTED;
+        match_rule_type = VERIFICATION_DIRECTIVE_CONTAINS;
+      } else {
+        match_rule_type = VERIFICATION_DIRECTIVE_PRESENCE;
+      }
+      match_is_inverted = !RULE_IS_INVERTED;
+    } else if (is_inverted && rule_type != VERIFICATION_DIRECTIVE_ABSENCE) {
+      mode = HttpFields::SetCookieRuleMode::AssertNoMatch;
+      match_is_inverted = !RULE_IS_INVERTED;
+    }
+
+    std::shared_ptr<RuleCheck> tester =
+        make_set_cookie_check(value, diagnostic_rule_type, diagnostic_is_inverted);
+    if (!tester) {
+      errata.note(S_ERROR, "Set-Cookie rule at {} has an invalid directive ({}).", mark, rule_type);
+      return;
+    }
+
+    std::shared_ptr<RuleCheck> match_tester = tester;
+    if (mode == HttpFields::SetCookieRuleMode::AssertNoMatch) {
+      match_tester = make_set_cookie_check(value, match_rule_type, match_is_inverted);
+      if (!match_tester) {
+        errata
+            .note(S_ERROR, "Set-Cookie rule at {} has an invalid directive ({}).", mark, rule_type);
+        return;
+      }
+    }
+
+    fields._set_cookie_rules.emplace_back(tester, match_tester, mode);
+  };
+
+  if (values.empty()) {
+    append_rule(swoc::TextView{}, false);
+    return errata;
+  }
+
+  for (auto const &value : values) {
+    append_rule(value, true);
+  }
+  return errata;
+}
+
+Errata
+parse_set_cookie_rules(YAML::Node const &set_cookie_rules_node, HttpFields &fields)
+{
+  Errata errata;
+
+  for (auto const &node : set_cookie_rules_node) {
+    if (node.IsScalar()) {
+      TextView value{Localizer::localize(node.Scalar())};
+      errata.note(append_set_cookie_rule(
+          fields,
+          node.Mark(),
+          std::vector<TextView>{value},
+          VERIFICATION_DIRECTIVE_EQUALS,
+          !RULE_IS_INVERTED,
+          !RULE_IS_CASE_INSENSITIVE));
+      continue;
+    }
+
+    if (!node.IsMap()) {
+      errata.note(
+          S_ERROR,
+          "Set-Cookie rule at {} must be specified as a scalar or map.",
+          node.Mark());
+      continue;
+    }
+
+    auto const rule_case_node{node[YAML_RULE_CASE_MAP_KEY]};
+    bool is_nocase = false;
+    if (rule_case_node && rule_case_node.IsScalar()) {
+      TextView case_str = Localizer::localize(rule_case_node.Scalar());
+      if (case_str == VERIFICATION_DIRECTIVE_IGNORE) {
+        is_nocase = true;
+      }
+    }
+
+    TextView rule_type = VERIFICATION_DIRECTIVE_EQUALS;
+    bool is_inverted = false;
+    if (auto const rule_type_node_as = node[YAML_RULE_TYPE_MAP_KEY]; rule_type_node_as) {
+      rule_type = rule_type_node_as.Scalar();
+    } else if (auto const rule_type_node_not = node[YAML_RULE_TYPE_MAP_KEY_NOT]; rule_type_node_not)
+    {
+      rule_type = rule_type_node_not.Scalar();
+      is_inverted = true;
+    }
+
+    std::vector<TextView> values;
+    auto const field_value_node{node[YAML_RULE_VALUE_MAP_KEY]};
+    if (field_value_node) {
+      if (field_value_node.IsScalar()) {
+        values.emplace_back(Localizer::localize(field_value_node.Scalar()));
+      } else if (field_value_node.IsSequence()) {
+        values.reserve(field_value_node.size());
+        for (auto const &value : field_value_node) {
+          if (!value.IsScalar()) {
+            errata.note(
+                S_ERROR,
+                "Set-Cookie rule at {} must contain only scalar values.",
+                node.Mark());
+            values.clear();
+            break;
+          }
+          values.emplace_back(Localizer::localize(value.Scalar()));
+        }
+        if (values.empty() && field_value_node.size() > 0) {
+          continue;
+        }
+      } else {
+        errata.note(S_ERROR, "Set-Cookie rule at {} is null or malformed.", node.Mark());
+        continue;
+      }
+    }
+
+    errata.note(
+        append_set_cookie_rule(fields, node.Mark(), values, rule_type, is_inverted, is_nocase));
+  }
+
   return errata;
 }
 
@@ -624,6 +807,14 @@ YamlParser::populate_http_message(YAML::Node const &node, HttpHeader &message)
         errata.note(std::move(result));
       }
     }
+    if (hdr_node[YAML_SET_COOKIE_VERIFICATIONS_KEY]) {
+      auto set_cookie_rules_node{hdr_node[YAML_SET_COOKIE_VERIFICATIONS_KEY]};
+      Errata result = parse_set_cookie_rules(set_cookie_rules_node, *message._fields_rules);
+      if (!result.is_ok()) {
+        errata.note(S_ERROR, "Failed to parse Set-Cookie rules at {}", node.Mark());
+        errata.note(std::move(result));
+      }
+    }
   }
   // Parse the trailer.
   if (node[YAML_TRAILER_KEY]) {
@@ -636,6 +827,14 @@ YamlParser::populate_http_message(YAML::Node const &node, HttpHeader &message)
           message._verify_strictly);
       if (!result.is_ok()) {
         errata.note(S_ERROR, "Failed to parse trailer at {}", node.Mark());
+        errata.note(std::move(result));
+      }
+    }
+    if (hdr_node[YAML_SET_COOKIE_VERIFICATIONS_KEY]) {
+      auto set_cookie_rules_node{hdr_node[YAML_SET_COOKIE_VERIFICATIONS_KEY]};
+      Errata result = parse_set_cookie_rules(set_cookie_rules_node, *message._trailer_fields_rules);
+      if (!result.is_ok()) {
+        errata.note(S_ERROR, "Failed to parse trailer Set-Cookie rules at {}", node.Mark());
         errata.note(std::move(result));
       }
     }
@@ -913,6 +1112,14 @@ YamlParser::parse_global_rules(YAML::Node const &node, HttpFields &fields)
   } else {
     errata.note(S_INFO, R"(Node at {} is missing a fields node.)", node.Mark());
   }
+
+  if (auto set_cookie_rules_node{node[YAML_SET_COOKIE_VERIFICATIONS_KEY]}; set_cookie_rules_node) {
+    auto result{parse_set_cookie_rules(set_cookie_rules_node, fields)};
+    if (!result.is_ok()) {
+      errata.note(S_ERROR, "Failed to parse Set-Cookie rules at {}", node.Mark());
+      errata.note(std::move(result));
+    }
+  }
   return errata;
 }
 
@@ -1067,6 +1274,7 @@ YamlParser::parse_fields_and_rules(
 
     // Get name of header being tested
     TextView name{Localizer::localize_lower(node[YAML_RULE_KEY_INDEX].Scalar())};
+    bool const is_set_cookie = strcasecmp(name, HttpHeader::FIELD_SET_COOKIE) == 0;
     const YAML::Node ValueNode{node[YAML_RULE_VALUE_INDEX]};
     if (ValueNode.IsScalar()) {
       // Legacy support for non-map nodes, not/nocase unsupported
@@ -1074,21 +1282,41 @@ YamlParser::parse_fields_and_rules(
       TextView value{Localizer::localize(node[YAML_RULE_VALUE_INDEX].Scalar())};
       fields.add_field(name, value);
       if (node_size == 2 && assume_equality_rule) {
-        fields._rules.emplace(name, RuleCheck::make_equality(name, value));
+        if (is_set_cookie) {
+          errata.note(append_set_cookie_rule(
+              fields,
+              node.Mark(),
+              std::vector<TextView>{value},
+              VERIFICATION_DIRECTIVE_EQUALS,
+              !RULE_IS_INVERTED,
+              !RULE_IS_CASE_INSENSITIVE));
+        } else {
+          fields._rules.emplace(name, RuleCheck::make_equality(name, value));
+        }
       } else if (node_size == 3) {
         // Contains a verification rule.
         // -[ Host, example.com, equal ]
         TextView rule_type{node[YAML_RULE_TYPE_INDEX].Scalar()};
-        std::shared_ptr<RuleCheck> tester = RuleCheck::make_rule_check(name, value, rule_type);
-        if (!tester) {
-          errata.note(
-              S_ERROR,
-              "Field rule at {} does not have a valid directive ({})",
+        if (is_set_cookie) {
+          errata.note(append_set_cookie_rule(
+              fields,
               node.Mark(),
-              rule_type);
-          continue;
+              std::vector<TextView>{value},
+              rule_type,
+              !RULE_IS_INVERTED,
+              !RULE_IS_CASE_INSENSITIVE));
         } else {
-          fields._rules.emplace(name, tester);
+          std::shared_ptr<RuleCheck> tester = RuleCheck::make_rule_check(name, value, rule_type);
+          if (!tester) {
+            errata.note(
+                S_ERROR,
+                "Field rule at {} does not have a valid directive ({})",
+                node.Mark(),
+                rule_type);
+            continue;
+          } else {
+            fields._rules.emplace(name, tester);
+          }
         }
       }
     } else if (ValueNode.IsSequence()) {
@@ -1103,22 +1331,44 @@ YamlParser::parse_fields_and_rules(
         fields.add_field(name, localized_value);
       }
       if (node_size == 2 && assume_equality_rule) {
-        fields._rules.emplace(name, RuleCheck::make_equality(name, std::move(values)));
+        if (is_set_cookie) {
+          errata.note(append_set_cookie_rule(
+              fields,
+              node.Mark(),
+              values,
+              VERIFICATION_DIRECTIVE_EQUALS,
+              !RULE_IS_INVERTED,
+              !RULE_IS_CASE_INSENSITIVE));
+        } else {
+          auto combined_value{Localizer::localize(combine_field_values(values))};
+          fields._rules.emplace(name, RuleCheck::make_equality(name, combined_value));
+        }
       } else if (node_size == 3) {
         // Contains a verification rule.
         // -[ set-cookie, [ first-cookie, second-cookie ], present ]
         TextView rule_type{node[YAML_RULE_TYPE_INDEX].Scalar()};
-        std::shared_ptr<RuleCheck> tester =
-            RuleCheck::make_rule_check(name, std::move(values), rule_type);
-        if (!tester) {
-          errata.note(
-              S_ERROR,
-              "Field rule at {} does not have a valid directive ({})",
+        if (is_set_cookie) {
+          errata.note(append_set_cookie_rule(
+              fields,
               node.Mark(),
-              rule_type);
-          continue;
+              values,
+              rule_type,
+              !RULE_IS_INVERTED,
+              !RULE_IS_CASE_INSENSITIVE));
         } else {
-          fields._rules.emplace(name, tester);
+          auto combined_value{Localizer::localize(combine_field_values(values))};
+          std::shared_ptr<RuleCheck> tester =
+              RuleCheck::make_rule_check(name, combined_value, rule_type);
+          if (!tester) {
+            errata.note(
+                S_ERROR,
+                "Field rule at {} does not have a valid directive ({})",
+                node.Mark(),
+                rule_type);
+            continue;
+          } else {
+            fields._rules.emplace(name, tester);
+          }
         }
       }
     } else if (ValueNode.IsMap()) {
@@ -1164,32 +1414,57 @@ YamlParser::parse_fields_and_rules(
           // Single value
           value = Localizer::localize(field_value_node.Scalar());
           fields.add_field(name, value);
-          tester = RuleCheck::make_rule_check(name, value, rule_type, is_inverted, is_nocase);
+          if (is_set_cookie) {
+            errata.note(append_set_cookie_rule(
+                fields,
+                node.Mark(),
+                std::vector<TextView>{value},
+                rule_type,
+                is_inverted,
+                is_nocase));
+          } else {
+            tester = RuleCheck::make_rule_check(name, value, rule_type, is_inverted, is_nocase);
+          }
         } else if (field_value_node.IsSequence()) {
-          // Verification is for duplicate fields:
-          // -[ set-cookie, { value: [ cookiea, cookieb], as: equal } ]
           std::vector<TextView> values;
-          values.reserve(ValueNode.size());
+          values.reserve(field_value_node.size());
           for (auto const &value : field_value_node) {
             TextView localized_value{Localizer::localize(value.Scalar())};
             values.emplace_back(localized_value);
             fields.add_field(name, localized_value);
           }
-          tester = RuleCheck::make_rule_check(
-              name,
-              std::move(values),
-              rule_type,
-              is_inverted,
-              is_nocase);
+          if (is_set_cookie) {
+            errata.note(append_set_cookie_rule(
+                fields,
+                node.Mark(),
+                values,
+                rule_type,
+                is_inverted,
+                is_nocase));
+          } else {
+            auto combined_value{Localizer::localize(combine_field_values(values))};
+            tester =
+                RuleCheck::make_rule_check(name, combined_value, rule_type, is_inverted, is_nocase);
+          }
         }
       } else {
         // Attempt to create check with empty value; if failure, next if will catch
-        tester = RuleCheck::make_rule_check(name, value, rule_type, is_inverted, is_nocase);
+        if (is_set_cookie) {
+          errata.note(append_set_cookie_rule(
+              fields,
+              node.Mark(),
+              std::vector<TextView>{},
+              rule_type,
+              is_inverted,
+              is_nocase));
+        } else {
+          tester = RuleCheck::make_rule_check(name, value, rule_type, is_inverted, is_nocase);
+        }
       }
 
       if (tester) {
         fields._rules.emplace(name, tester);
-      } else if (!rule_type.empty()) {
+      } else if (!rule_type.empty() && !is_set_cookie) {
         // Do not report error if no rule because of client request/server response
         errata.note(
             S_ERROR,
@@ -2167,7 +2442,7 @@ YamlParser::load_replay_file(
       if (auto prsp_node{txn_node[YAML_PROXY_RSP_KEY]}; prsp_node) {
         txn_errata.note(handler.proxy_response(prsp_node));
       }
-      if (!all_fields._fields.empty()) {
+      if (!all_fields._fields.empty() || all_fields.has_rules()) {
         txn_errata.note(handler.apply_to_all_messages(all_fields));
       }
       txn_errata.note(handler.txn_close());
