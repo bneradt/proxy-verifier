@@ -85,6 +85,7 @@ Table of Contents
       * [Remap Config to URL List <a href="tools/remap-config-to-url-list.py">remap-config-to-url-list.py</a>](tools/remap-config-to-url-list.py)
          * [-o,--output &lt;OUTPUT_FILE&gt;](#-o--output-output_file)
          * [--no-ip](#--no-ip)
+      * [Replay Monitoring Scripts](#replay-monitoring-scripts)
    * [Contribute](#contribute)
    * [License](#license)
 
@@ -2449,6 +2450,33 @@ A filename to which to write the list of URLs. Defaults to `stdout`.
 
 #### --no-ip
 Ignore ip address (in the "replacement" section) in the `remap.config` file.
+
+### Replay Monitoring Scripts
+These scripts gather replay diagnostics while `verifier-client` or
+`verifier-server` is running:
+
+* [tools/replay-client-monitor.sh](tools/replay-client-monitor.sh)
+* [tools/replay-server-monitor.sh](tools/replay-server-monitor.sh)
+
+Start the appropriate monitor before replay, leave it running while traffic is
+active, and stop it with `Ctrl-C` after the replay completes. Each script waits
+for the corresponding process to appear, then writes timestamped `ps`,
+per-thread CPU, `pidstat` (when available), and `ss` port-distribution
+snapshots into a timestamped output directory.
+
+Example usage:
+
+```bash
+bash tools/replay-client-monitor.sh
+bash tools/replay-server-monitor.sh
+```
+
+You can optionally provide an explicit output directory as the first argument:
+
+```bash
+bash tools/replay-client-monitor.sh /tmp/pv-client-monitor
+bash tools/replay-server-monitor.sh /tmp/pv-server-monitor
+```
 
 ## Contribute
 

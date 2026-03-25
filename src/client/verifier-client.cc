@@ -13,14 +13,20 @@
 #include "core/ProxyVerifier.h"
 #include "core/YamlParser.h"
 
+#include <arpa/inet.h>
+#include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <list>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -51,6 +57,237 @@ using ClockType = std::chrono::steady_clock;
 using TimePoint = std::chrono::time_point<ClockType, nanoseconds>;
 using std::this_thread::sleep_for;
 
+namespace
+{
+std::string
+format_endpoint(swoc::IPEndpoint const &endpoint)
+{
+  swoc::IPEndpoint endpoint_copy{endpoint};
+  swoc::LocalBufferWriter<256> w;
+  w.print("{::a}:{}", endpoint_copy, ntohs(swoc::IPEndpoint::port(&endpoint_copy.sa)));
+  return std::string{w.view()};
+}
+
+double
+as_milliseconds(microseconds duration)
+{
+  return duration.count() / 1000.0;
+}
+
+microseconds
+pick_percentile(std::vector<microseconds> const &sorted_durations, double percentile)
+{
+  if (sorted_durations.empty()) {
+    return 0us;
+  }
+  auto const scaled_index = percentile * static_cast<double>(sorted_durations.size());
+  auto const unclamped_index = static_cast<size_t>(std::ceil(std::max(0.0, scaled_index)) - 1.0);
+  auto const index = std::min(sorted_durations.size() - 1, unclamped_index);
+  return sorted_durations[index];
+}
+
+std::string_view
+get_session_protocol_name(Ssn const &ssn)
+{
+  if (ssn.is_h3) {
+    return "h3";
+  }
+  if (ssn.is_h2) {
+    return "h2";
+  }
+  if (ssn.is_tls) {
+    return "https";
+  }
+  return "http";
+}
+
+struct ClientTargetSelectionAggregate
+{
+  std::string transport;
+  std::string target;
+  uint64_t selections = 0;
+};
+
+struct ClientSessionAggregate
+{
+  std::string protocol;
+  std::string target;
+  uint64_t session_count = 0;
+  uint64_t transaction_count = 0;
+  std::vector<microseconds> durations;
+};
+
+class ClientReplayDiagnostics
+{
+public:
+  void reset();
+  void record_worker_wait(microseconds wait_time);
+  void record_target_selection(std::string_view transport, swoc::IPEndpoint const &endpoint);
+  void record_session_result(
+      std::string_view protocol,
+      std::string_view target,
+      size_t transaction_count,
+      microseconds duration);
+  void worker_assigned();
+  void worker_completed();
+  void append_summary(Errata &errata) const;
+
+private:
+  static void update_max_value(std::atomic<size_t> &current_max, size_t candidate);
+
+private:
+  mutable std::mutex m_mutex;
+  std::vector<microseconds> m_worker_waits;
+  microseconds m_total_worker_wait = 0us;
+  std::map<std::string, ClientTargetSelectionAggregate> m_target_selections;
+  std::map<std::string, ClientSessionAggregate> m_session_aggregates;
+  std::atomic<size_t> m_busy_workers = 0;
+  std::atomic<size_t> m_max_busy_workers = 0;
+};
+
+ClientReplayDiagnostics Client_Replay_Diagnostics;
+
+void
+ClientReplayDiagnostics::reset()
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_worker_waits.clear();
+  m_total_worker_wait = 0us;
+  m_target_selections.clear();
+  m_session_aggregates.clear();
+  m_busy_workers = 0;
+  m_max_busy_workers = 0;
+}
+
+void
+ClientReplayDiagnostics::record_worker_wait(microseconds wait_time)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_worker_waits.push_back(wait_time);
+  m_total_worker_wait += wait_time;
+}
+
+void
+ClientReplayDiagnostics::record_target_selection(
+    std::string_view transport,
+    swoc::IPEndpoint const &endpoint)
+{
+  auto const target = format_endpoint(endpoint);
+  auto key = std::string{transport};
+  key.append(" ");
+  key.append(target);
+  std::lock_guard<std::mutex> lock(m_mutex);
+  auto &[stored_transport, stored_target, selections] = m_target_selections[key];
+  if (stored_transport.empty()) {
+    stored_transport.assign(transport);
+    stored_target = target;
+  }
+  ++selections;
+}
+
+void
+ClientReplayDiagnostics::record_session_result(
+    std::string_view protocol,
+    std::string_view target,
+    size_t transaction_count,
+    microseconds duration)
+{
+  auto key = std::string{protocol};
+  key.append(" ");
+  key.append(target);
+  std::lock_guard<std::mutex> lock(m_mutex);
+  auto &aggregate = m_session_aggregates[key];
+  if (aggregate.protocol.empty()) {
+    aggregate.protocol.assign(protocol);
+    aggregate.target.assign(target);
+  }
+  ++aggregate.session_count;
+  aggregate.transaction_count += transaction_count;
+  aggregate.durations.push_back(duration);
+}
+
+void
+ClientReplayDiagnostics::update_max_value(std::atomic<size_t> &current_max, size_t candidate)
+{
+  auto observed_max = current_max.load(std::memory_order_relaxed);
+  while (candidate > observed_max && !current_max.compare_exchange_weak(
+                                         observed_max,
+                                         candidate,
+                                         std::memory_order_relaxed,
+                                         std::memory_order_relaxed))
+  {
+  }
+}
+
+void
+ClientReplayDiagnostics::worker_assigned()
+{
+  auto const busy_workers = m_busy_workers.fetch_add(1, std::memory_order_relaxed) + 1;
+  update_max_value(m_max_busy_workers, busy_workers);
+}
+
+void
+ClientReplayDiagnostics::worker_completed()
+{
+  auto const prior_busy_workers = m_busy_workers.fetch_sub(1, std::memory_order_relaxed);
+  if (prior_busy_workers == 0) {
+    m_busy_workers = 0;
+    assert(false);
+  }
+}
+
+void
+ClientReplayDiagnostics::append_summary(Errata &errata) const
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (!m_worker_waits.empty()) {
+    auto sorted_waits = m_worker_waits;
+    std::sort(sorted_waits.begin(), sorted_waits.end());
+    auto const average_wait_ms =
+        as_milliseconds(m_total_worker_wait) / static_cast<double>(sorted_waits.size());
+    errata.note(
+        S_INFO,
+        "Client worker wait summary: samples={}, total={:.3f}ms, avg={:.3f}ms, "
+        "p95={:.3f}ms, max={:.3f}ms, max-busy-workers={}.",
+        sorted_waits.size(),
+        as_milliseconds(m_total_worker_wait),
+        average_wait_ms,
+        as_milliseconds(pick_percentile(sorted_waits, 0.95)),
+        as_milliseconds(sorted_waits.back()),
+        m_max_busy_workers.load(std::memory_order_relaxed));
+  }
+  for (auto const &[key, aggregate] : m_target_selections) {
+    static_cast<void>(key);
+    errata.note(
+        S_INFO,
+        "Client target selection summary: transport={} target={} selections={}.",
+        aggregate.transport,
+        aggregate.target,
+        aggregate.selections);
+  }
+  for (auto const &[key, aggregate] : m_session_aggregates) {
+    static_cast<void>(key);
+    if (aggregate.durations.empty()) {
+      continue;
+    }
+    auto sorted_durations = aggregate.durations;
+    std::sort(sorted_durations.begin(), sorted_durations.end());
+    errata.note(
+        S_INFO,
+        "Client session summary: protocol={} target={} sessions={} transactions={} "
+        "p50={:.3f}ms p95={:.3f}ms p99={:.3f}ms max={:.3f}ms.",
+        aggregate.protocol,
+        aggregate.target,
+        aggregate.session_count,
+        aggregate.transaction_count,
+        as_milliseconds(pick_percentile(sorted_durations, 0.50)),
+        as_milliseconds(pick_percentile(sorted_durations, 0.95)),
+        as_milliseconds(pick_percentile(sorted_durations, 0.99)),
+        as_milliseconds(sorted_durations.back()));
+  }
+}
+} // namespace
+
 /** Whether to verify each response against the corresponding proxy-response
  * in the yaml file.
  */
@@ -77,6 +314,7 @@ struct TargetSelector
     }
     auto const index = http_target_index.fetch_add(1, std::memory_order_relaxed);
     auto const *http_target = &http_targets[index % http_targets.size()];
+    Client_Replay_Diagnostics.record_target_selection("http", *http_target);
     return http_target;
   }
 
@@ -89,6 +327,7 @@ struct TargetSelector
     }
     auto const index = https_target_index.fetch_add(1, std::memory_order_relaxed);
     auto const *https_target = &https_targets[index % https_targets.size()];
+    Client_Replay_Diagnostics.record_target_selection("https", *https_target);
     return https_target;
   }
 
@@ -101,6 +340,7 @@ struct TargetSelector
     }
     auto const index = http3_target_index.fetch_add(1, std::memory_order_relaxed);
     auto const *http3_target = &http3_targets[index % http3_targets.size()];
+    Client_Replay_Diagnostics.record_target_selection("http3", *http3_target);
     return http3_target;
   }
 
@@ -635,6 +875,8 @@ shutdown_signal_handler(int signal)
 void
 Run_Session(Ssn const &ssn, TargetSelector &target_selector)
 {
+  auto const session_start = ClockType::now();
+  auto const protocol_name = get_session_protocol_name(ssn);
   std::unique_ptr<Session> session;
   swoc::IPEndpoint const *real_target = nullptr;
   Errata errata;
@@ -689,6 +931,13 @@ Run_Session(Ssn const &ssn, TargetSelector &target_selector)
   }
 
   if (!errata.is_ok() || real_target == nullptr) {
+    if (real_target != nullptr) {
+      Client_Replay_Diagnostics.record_session_result(
+          protocol_name,
+          format_endpoint(*real_target),
+          ssn._transactions.size(),
+          duration_cast<microseconds>(ClockType::now() - session_start));
+    }
     Engine::process_exit_code = 1;
     return;
   }
@@ -698,6 +947,11 @@ Run_Session(Ssn const &ssn, TargetSelector &target_selector)
   // Thus, sending the header in do_connect()
   errata.note(session->do_connect(specified_interface, real_target, ssn._pp_msg.get()));
   if (!errata.is_ok()) {
+    Client_Replay_Diagnostics.record_session_result(
+        protocol_name,
+        format_endpoint(*real_target),
+        ssn._transactions.size(),
+        duration_cast<microseconds>(ClockType::now() - session_start));
     Engine::process_exit_code = 1;
     return;
   }
@@ -711,6 +965,12 @@ Run_Session(Ssn const &ssn, TargetSelector &target_selector)
   if (ssn._keep_connection_open > 0us) {
     sleep_for(ssn._keep_connection_open);
   }
+
+  Client_Replay_Diagnostics.record_session_result(
+      protocol_name,
+      format_endpoint(*real_target),
+      ssn._transactions.size(),
+      duration_cast<microseconds>(ClockType::now() - session_start));
 
   if (!errata.is_ok()) {
     Engine::process_exit_code = 1;
@@ -730,6 +990,7 @@ TF_Client(std::thread *t)
 
     if (thread_info.m_ssn != nullptr) {
       Run_Session(*thread_info.m_ssn, Target_Selector);
+      Client_Replay_Diagnostics.worker_completed();
     }
   }
 }
@@ -966,6 +1227,7 @@ Engine::replay_traffic()
   if (Shutdown_Flag) {
     return false;
   }
+  Client_Replay_Diagnostics.reset();
 
   auto sleep_limit_arg{arguments.get("sleep-limit")};
   microseconds sleep_limit = 500ms;
@@ -1127,11 +1389,15 @@ Engine::replay_traffic()
       if (Shutdown_Flag) {
         break;
       }
+      auto const get_worker_start = ClockType::now();
       ClientThreadInfo *thread_info =
           dynamic_cast<ClientThreadInfo *>(Client_Thread_Pool.get_worker());
+      Client_Replay_Diagnostics.record_worker_wait(
+          duration_cast<microseconds>(ClockType::now() - get_worker_start));
       if (nullptr == thread_info) {
         errata.note(S_ERROR, "Failed to get worker thread");
       } else {
+        Client_Replay_Diagnostics.worker_assigned();
         // Only pointer to worker thread info.
         {
           std::unique_lock<std::mutex> lock(thread_info->_data_ready_mutex);
@@ -1177,6 +1443,8 @@ Engine::replay_traffic()
       replay_duration.count(),
       swoc::bwf::If(replay_duration.count() != 1, "s"),
       n_megabytes / static_cast<double>(replay_duration.count()));
+  Client_Replay_Diagnostics.append_summary(errata);
+  errata.note(H2Session::summarize_replay_metrics());
   if (!Allow_Unprocessed_Verifications) {
     std::vector<Txn const *> transactions;
     transactions.reserve(m_transaction_count);

@@ -10,8 +10,12 @@
 #include "core/verification.h"
 #include "core/ProxyVerifier.h"
 
+#include <arpa/inet.h>
 #include <algorithm>
+#include <array>
 #include <cassert>
+#include <map>
+#include <mutex>
 #include <netdb.h>
 #include <thread>
 
@@ -43,19 +47,173 @@ static ssize_t receive_nghttp2_data(
 
 namespace
 {
-struct H2DrainWindow
+std::string
+format_endpoint(swoc::IPEndpoint const *endpoint)
 {
-  ssize_t bytes_received = 0;
-  size_t streams_completed = 0;
-  size_t inflight_before = 0;
-  size_t inflight_after = 0;
-
-  bool
-  made_progress() const
-  {
-    return bytes_received > 0 || streams_completed > 0;
+  if (endpoint == nullptr) {
+    return "unassigned";
   }
+  swoc::IPEndpoint endpoint_copy{*endpoint};
+  swoc::LocalBufferWriter<256> w;
+  w.print("{::a}:{}", endpoint_copy, ntohs(swoc::IPEndpoint::port(&endpoint_copy.sa)));
+  return std::string{w.view()};
+}
+
+swoc::TextView
+request_authority(HttpHeader const &request)
+{
+  if (!request._authority.empty()) {
+    return request._authority;
+  }
+  return request.uri_authority;
+}
+
+swoc::TextView
+request_path(HttpHeader const &request)
+{
+  if (!request._path.empty()) {
+    return request._path;
+  }
+  if (!request.uri_path.empty()) {
+    return request.uri_path;
+  }
+  return request._url;
+}
+
+size_t
+final_drain_bucket_index(milliseconds duration)
+{
+  static constexpr std::array<milliseconds, 7> BUCKET_LIMITS{
+      0ms,
+      10ms,
+      100ms,
+      1s,
+      5s,
+      10s,
+      15s,
+  };
+  for (size_t i = 0; i < BUCKET_LIMITS.size(); ++i) {
+    if (duration <= BUCKET_LIMITS[i]) {
+      return i;
+    }
+  }
+  return BUCKET_LIMITS.size();
+}
+
+std::string
+format_histogram(std::map<size_t, uint64_t> const &histogram)
+{
+  std::string text;
+  bool first = true;
+  for (auto const &[bucket, count] : histogram) {
+    if (!first) {
+      text.append(", ");
+    }
+    first = false;
+    text.append(std::to_string(bucket));
+    text.append(": ");
+    text.append(std::to_string(count));
+  }
+  if (text.empty()) {
+    return "none";
+  }
+  return text;
+}
+
+class H2ReplayDiagnostics
+{
+public:
+  void reset();
+  void record_session(
+      size_t max_in_flight_streams,
+      milliseconds final_drain_duration,
+      size_t no_progress_window_count,
+      milliseconds no_progress_time,
+      bool stuck_session);
+  void append_summary(Errata &errata) const;
+
+private:
+  mutable std::mutex m_mutex;
+  uint64_t m_session_count = 0;
+  uint64_t m_stuck_session_count = 0;
+  uint64_t m_no_progress_window_count = 0;
+  milliseconds m_total_no_progress_time{0};
+  std::array<uint64_t, 8> m_final_drain_histogram{};
+  std::map<size_t, uint64_t> m_max_in_flight_histogram;
 };
+
+H2ReplayDiagnostics H2_Replay_Diagnostics;
+
+void
+H2ReplayDiagnostics::reset()
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_session_count = 0;
+  m_stuck_session_count = 0;
+  m_no_progress_window_count = 0;
+  m_total_no_progress_time = 0ms;
+  m_final_drain_histogram.fill(0);
+  m_max_in_flight_histogram.clear();
+}
+
+void
+H2ReplayDiagnostics::record_session(
+    size_t max_in_flight_streams,
+    milliseconds final_drain_duration,
+    size_t no_progress_window_count,
+    milliseconds no_progress_time,
+    bool stuck_session)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  ++m_session_count;
+  m_stuck_session_count += stuck_session ? 1 : 0;
+  m_no_progress_window_count += no_progress_window_count;
+  m_total_no_progress_time += no_progress_time;
+  ++m_final_drain_histogram[final_drain_bucket_index(final_drain_duration)];
+  ++m_max_in_flight_histogram[max_in_flight_streams];
+}
+
+void
+H2ReplayDiagnostics::append_summary(Errata &errata) const
+{
+  static constexpr std::array<std::string_view, 8> FINAL_DRAIN_BUCKET_LABELS{
+      "<=0ms",
+      "1-10ms",
+      "11-100ms",
+      "101-1000ms",
+      "1001-5000ms",
+      "5001-10000ms",
+      "10001-15000ms",
+      ">15000ms",
+  };
+
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (m_session_count == 0) {
+    return;
+  }
+  errata.note(
+      S_INFO,
+      "HTTP/2 replay summary: sessions={} stuck-sessions={} no-progress-windows={} "
+      "no-progress-time={}ms.",
+      m_session_count,
+      m_stuck_session_count,
+      m_no_progress_window_count,
+      m_total_no_progress_time.count());
+  for (size_t i = 0; i < FINAL_DRAIN_BUCKET_LABELS.size(); ++i) {
+    if (m_final_drain_histogram[i] == 0) {
+      continue;
+    }
+    errata.note(
+        S_INFO,
+        "HTTP/2 final-drain histogram: bucket={} sessions={}.",
+        FINAL_DRAIN_BUCKET_LABELS[i],
+        m_final_drain_histogram[i]);
+  }
+  errata.note(
+      S_INFO,
+      "HTTP/2 max-in-flight histogram: {}.",
+      format_histogram(m_max_in_flight_histogram));
+}
 
 bool
 http2_connection_token_matches(swoc::TextView header_value, swoc::TextView field_name)
@@ -109,61 +267,6 @@ get_h2_in_flight_stream_cap(H2Session &session)
     return Default_H2_InFlight_Stream_Cap;
   }
   return std::max<size_t>(1, remote_stream_cap);
-}
-
-void
-append_h2_stuck_stream_summary(
-    Errata &errata,
-    H2Session const &session,
-    std::string_view context,
-    size_t consecutive_no_progress_windows)
-{
-  errata.note(
-      S_ERROR,
-      "HTTP/2 {} made no forward progress for {} consecutive timeout windows. "
-      "Stopping replay for this session with {} in-flight stream{}.",
-      context,
-      consecutive_no_progress_windows,
-      session._stream_map.size(),
-      swoc::bwf::If(session._stream_map.size() != 1, "s"));
-  for (auto const &[stream_id, stream_state] : session._stream_map) {
-    errata.note(S_ERROR, "    {}: {}", stream_id, stream_state->_key);
-  }
-}
-
-swoc::Rv<H2DrainWindow>
-drain_h2_receive_window(H2Session &session, milliseconds timeout, std::string_view context)
-{
-  swoc::Rv<H2DrainWindow> zret{H2DrainWindow{}};
-  auto &progress = zret.result();
-  progress.inflight_before = session._stream_map.size();
-
-  auto const received_bytes =
-      receive_nghttp2_data(session.get_session(), nullptr, 0, 0, &session, timeout);
-  if (received_bytes < 0) {
-    zret.note(S_ERROR, "Failed to drain HTTP/2 {}.", context);
-    return zret;
-  }
-
-  progress.bytes_received = received_bytes;
-  progress.inflight_after = session._stream_map.size();
-  if (progress.inflight_before > progress.inflight_after) {
-    progress.streams_completed = progress.inflight_before - progress.inflight_after;
-  }
-
-  if (timeout > 0ms) {
-    zret.note(
-        S_DIAG,
-        "HTTP/2 {} receive window progress={} bytes={} completed-streams={} in-flight={} -> {}.",
-        context,
-        progress.made_progress() ? "yes" : "no",
-        progress.bytes_received,
-        progress.streams_completed,
-        progress.inflight_before,
-        progress.inflight_after);
-  }
-
-  return zret;
 }
 } // namespace
 
@@ -276,6 +379,119 @@ bool
 H2Session::get_is_server() const
 {
   return _is_server;
+}
+
+std::string const &
+H2Session::get_replay_target() const
+{
+  return m_target_endpoint;
+}
+
+void
+H2Session::begin_replay_diagnostics(swoc::IPEndpoint const *real_target)
+{
+  m_target_endpoint = format_endpoint(real_target);
+  m_session_start = ClockType::now();
+  m_last_progress_time = m_session_start;
+  m_no_progress_window_time = 0ms;
+}
+
+void
+H2Session::note_replay_receive_progress()
+{
+  m_last_progress_time = ClockType::now();
+}
+
+void
+H2Session::record_no_progress_window(milliseconds duration)
+{
+  if (duration > 0ms) {
+    m_no_progress_window_time += duration;
+  }
+}
+
+swoc::Rv<H2Session::DrainWindow>
+H2Session::drain_receive_window(milliseconds timeout, swoc::TextView context)
+{
+  swoc::Rv<DrainWindow> zret{DrainWindow{}};
+  auto &progress = zret.result();
+  progress.inflight_before = _stream_map.size();
+
+  auto const received_bytes = receive_nghttp2_data(_session, nullptr, 0, 0, this, timeout);
+  if (received_bytes < 0) {
+    zret.note(S_ERROR, "Failed to drain HTTP/2 {}.", context);
+    return zret;
+  }
+
+  progress.bytes_received = received_bytes;
+  progress.inflight_after = _stream_map.size();
+  if (progress.inflight_before > progress.inflight_after) {
+    progress.streams_completed = progress.inflight_before - progress.inflight_after;
+  }
+
+  if (progress.made_progress()) {
+    note_replay_receive_progress();
+  } else {
+    record_no_progress_window(timeout);
+  }
+
+  if (timeout > 0ms) {
+    zret.note(
+        S_DIAG,
+        "HTTP/2 {} receive window progress={} bytes={} completed-streams={} in-flight={} -> {}.",
+        context,
+        progress.made_progress() ? "yes" : "no",
+        progress.bytes_received,
+        progress.streams_completed,
+        progress.inflight_before,
+        progress.inflight_after);
+  }
+
+  return zret;
+}
+
+void
+H2Session::append_stuck_stream_summary(
+    Errata &errata,
+    swoc::TextView context,
+    size_t consecutive_no_progress_windows) const
+{
+  auto const now = ClockType::now();
+  auto const session_age = duration_cast<milliseconds>(now - m_session_start);
+  auto const last_progress_age = duration_cast<milliseconds>(now - m_last_progress_time);
+  auto const target = m_target_endpoint.empty() ? "<unassigned>" : m_target_endpoint.c_str();
+  errata.note(
+      S_ERROR,
+      "HTTP/2 {} made no forward progress for {} consecutive timeout windows. "
+      "Stopping replay for this session with {} in-flight stream{} target={} "
+      "session-age={}ms last-progress-age={}ms.",
+      context,
+      consecutive_no_progress_windows,
+      _stream_map.size(),
+      swoc::bwf::If(_stream_map.size() != 1, "s"),
+      target,
+      session_age.count(),
+      last_progress_age.count());
+  for (auto const &[stream_id, stream_state] : _stream_map) {
+    auto const &request = *stream_state->_request_from_client;
+    auto const stream_age = duration_cast<milliseconds>(now - stream_state->_stream_start);
+    auto const method = request._method.empty() ? TextView{"<missing>"} : request._method;
+    auto const authority =
+        request_authority(request).empty() ? TextView{"<missing>"} : request_authority(request);
+    auto const path = request_path(request).empty() ? TextView{"<missing>"} : request_path(request);
+    errata.note(
+        S_ERROR,
+        "    stream={} key={} method={} authority={} path={} stream-age={}ms "
+        "response-headers-seen={} body-bytes={}",
+        stream_id,
+        stream_state->_key.empty() ? "<missing>" : stream_state->_key.c_str(),
+        method,
+        authority,
+        path,
+        stream_age.count(),
+        stream_state->_received_response_headers ? "yes" : "no",
+        stream_state->_body_received.size());
+  }
 }
 
 // static
@@ -449,6 +665,24 @@ H2Session::run_transactions(
   size_t max_in_flight_streams = 0;
   size_t send_phase_bytes_drained = 0;
   size_t logged_stream_cap = 0;
+  size_t total_no_progress_windows = 0;
+  bool session_was_stuck = false;
+  bool session_summary_recorded = false;
+
+  begin_replay_diagnostics(real_target);
+
+  auto record_session_summary = [&](milliseconds final_drain_duration) {
+    if (session_summary_recorded) {
+      return;
+    }
+    session_summary_recorded = true;
+    H2_Replay_Diagnostics.record_session(
+        max_in_flight_streams,
+        final_drain_duration,
+        total_no_progress_windows,
+        m_no_progress_window_time,
+        session_was_stuck);
+  };
 
   auto log_h2_replay_metrics = [&](milliseconds final_drain_duration) {
     errata.note(
@@ -495,8 +729,7 @@ H2Session::run_transactions(
         txn_errata.note(S_ERROR, R"(Timed out waiting for dependencies for key: {})", key);
         break;
       }
-      auto &&[progress, progress_errata] =
-          drain_h2_receive_window(*this, Poll_Timeout, "dependency wait");
+      auto &&[progress, progress_errata] = drain_receive_window(Poll_Timeout, "dependency wait");
       txn_errata.note(std::move(progress_errata));
       if (!txn_errata.is_ok()) {
         // There was a problem reading bytes on the socket.
@@ -506,12 +739,17 @@ H2Session::run_transactions(
             "transaction for --rate.");
         errata.note(std::move(txn_errata));
         log_h2_replay_metrics(0ms);
+        record_session_summary(0ms);
         return errata;
+      }
+      if (!progress.made_progress()) {
+        ++total_no_progress_windows;
       }
     }
     if (!txn_errata.is_ok()) {
       errata.note(std::move(txn_errata));
       log_h2_replay_metrics(0ms);
+      record_session_summary(0ms);
       break;
     }
     if (rate_multiplier != 0 || txn._user_specified_delay_duration > 0us) {
@@ -535,7 +773,7 @@ H2Session::run_transactions(
       while (delay_time > 0ms) {
         // Make use of our delay time to read any incoming responses.
         auto &&[progress, progress_errata] =
-            drain_h2_receive_window(*this, duration_cast<milliseconds>(delay_time), "delay window");
+            drain_receive_window(duration_cast<milliseconds>(delay_time), "delay window");
         txn_errata.note(std::move(progress_errata));
         if (!txn_errata.is_ok()) {
           // There was a problem reading bytes on the socket.
@@ -545,7 +783,11 @@ H2Session::run_transactions(
               "transaction for --rate.");
           errata.note(std::move(txn_errata));
           log_h2_replay_metrics(0ms);
+          record_session_summary(0ms);
           return errata;
+        }
+        if (!progress.made_progress()) {
+          ++total_no_progress_windows;
         }
         current_time = ClockType::now();
         delay_time = next_time - current_time;
@@ -561,6 +803,7 @@ H2Session::run_transactions(
       txn_errata.note(S_ERROR, R"(Failed HTTP/2 transaction with key: {})", key);
       errata.note(std::move(txn_errata));
       log_h2_replay_metrics(0ms);
+      record_session_summary(0ms);
       return errata;
     }
 
@@ -575,11 +818,12 @@ H2Session::run_transactions(
         max_in_flight_streams);
 
     auto &&[opportunistic_progress, opportunistic_errata] =
-        drain_h2_receive_window(*this, 0ms, "opportunistic send-phase");
+        drain_receive_window(0ms, "opportunistic send-phase");
     txn_errata.note(std::move(opportunistic_errata));
     if (!txn_errata.is_ok()) {
       errata.note(std::move(txn_errata));
       log_h2_replay_metrics(0ms);
+      record_session_summary(0ms);
       return errata;
     }
     if (opportunistic_progress.bytes_received > 0) {
@@ -591,11 +835,12 @@ H2Session::run_transactions(
       auto const target_in_flight = std::max<size_t>(1, effective_in_flight_stream_cap / 2);
       while (!this->_stream_map.empty() && this->_stream_map.size() > target_in_flight) {
         auto &&[window_progress, window_errata] =
-            drain_h2_receive_window(*this, Poll_Timeout, "send-phase backpressure");
+            drain_receive_window(Poll_Timeout, "send-phase backpressure");
         txn_errata.note(std::move(window_errata));
         if (!txn_errata.is_ok()) {
           errata.note(std::move(txn_errata));
           log_h2_replay_metrics(0ms);
+          record_session_summary(0ms);
           return errata;
         }
 
@@ -606,15 +851,17 @@ H2Session::run_transactions(
           no_progress_windows = 0;
         } else {
           ++no_progress_windows;
+          ++total_no_progress_windows;
           if (no_progress_windows >= H2NoProgressTimeoutBudget) {
-            append_h2_stuck_stream_summary(
+            session_was_stuck = true;
+            append_stuck_stream_summary(
                 txn_errata,
-                *this,
                 "send-phase backpressure drain",
                 no_progress_windows);
             this->close();
             errata.note(std::move(txn_errata));
             log_h2_replay_metrics(0ms);
+            record_session_summary(0ms);
             return errata;
           }
         }
@@ -635,10 +882,13 @@ H2Session::run_transactions(
   size_t no_progress_windows = 0;
   while (!this->_stream_map.empty() && !this->sent_goaway_frame) {
     auto &&[window_progress, window_errata] =
-        drain_h2_receive_window(*this, Poll_Timeout, "final response drain");
+        drain_receive_window(Poll_Timeout, "final response drain");
     errata.note(std::move(window_errata));
     if (!errata.is_ok()) {
-      log_h2_replay_metrics(duration_cast<milliseconds>(ClockType::now() - final_drain_start));
+      auto const final_drain_duration =
+          duration_cast<milliseconds>(ClockType::now() - final_drain_start);
+      log_h2_replay_metrics(final_drain_duration);
+      record_session_summary(final_drain_duration);
       return errata;
     }
 
@@ -646,16 +896,24 @@ H2Session::run_transactions(
       no_progress_windows = 0;
     } else {
       ++no_progress_windows;
+      ++total_no_progress_windows;
       if (no_progress_windows >= H2NoProgressTimeoutBudget) {
-        append_h2_stuck_stream_summary(errata, *this, "final response drain", no_progress_windows);
+        session_was_stuck = true;
+        append_stuck_stream_summary(errata, "final response drain", no_progress_windows);
         this->close();
-        log_h2_replay_metrics(duration_cast<milliseconds>(ClockType::now() - final_drain_start));
+        auto const final_drain_duration =
+            duration_cast<milliseconds>(ClockType::now() - final_drain_start);
+        log_h2_replay_metrics(final_drain_duration);
+        record_session_summary(final_drain_duration);
         return errata;
       }
     }
   }
 
-  log_h2_replay_metrics(duration_cast<milliseconds>(ClockType::now() - final_drain_start));
+  auto const final_drain_duration =
+      duration_cast<milliseconds>(ClockType::now() - final_drain_start);
+  log_h2_replay_metrics(final_drain_duration);
+  record_session_summary(final_drain_duration);
 
   return errata;
 }
@@ -1082,6 +1340,7 @@ on_frame_recv_cb(nghttp2_session * /* session */, nghttp2_frame const *frame, vo
       } else if (
           headers_category == NGHTTP2_HCAT_RESPONSE || headers_category == NGHTTP2_HCAT_HEADERS) {
         auto &response_from_wire = *stream_state._response_from_server;
+        stream_state._received_response_headers = true;
         response_from_wire.derive_key();
         if (stream_state._key.empty()) {
           // A response for which we didn't process the request, presumably. A
@@ -1226,11 +1485,26 @@ finalize_stream(H2Session *session_data, int32_t stream_id)
   }
 
   if (elapsed_ms > Transaction_Delay_Cutoff) {
+    auto const &request_from_client = *stream_state._request_from_client;
+    auto const target = session_data->get_replay_target().empty() ?
+                            "<unassigned>" :
+                            session_data->get_replay_target().c_str();
+    auto const method =
+        request_from_client._method.empty() ? TextView{"<missing>"} : request_from_client._method;
+    auto const authority = request_authority(request_from_client).empty() ?
+                               TextView{"<missing>"} :
+                               request_authority(request_from_client);
+    auto const path = request_path(request_from_client).empty() ? TextView{"<missing>"} :
+                                                                  request_path(request_from_client);
     errata.note(
         S_ERROR,
-        R"(HTTP/2 transaction in stream id {} with key {} took {}.)",
+        R"(HTTP/2 transaction in stream id {} with key {} target={} method={} authority={} path={} took {}.)",
         stream_id,
-        stream_state._key,
+        stream_state._key.empty() ? "<missing>" : stream_state._key.c_str(),
+        target,
+        method,
+        authority,
+        path,
         elapsed_ms);
   }
   session_data->_stream_map.erase(iter);
@@ -2032,9 +2306,19 @@ Errata
 H2Session::init(int *process_exit_code)
 {
   H2Session::process_exit_code = process_exit_code;
+  H2_Replay_Diagnostics.reset();
   Errata errata = H2Session::client_init(h2_client_context);
   errata.note(H2Session::server_init(server_context));
   errata.note(S_DIAG, "Finished H2Session::init");
+  return errata;
+}
+
+// static
+Errata
+H2Session::summarize_replay_metrics()
+{
+  Errata errata;
+  H2_Replay_Diagnostics.append_summary(errata);
   return errata;
 }
 

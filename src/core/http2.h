@@ -1,7 +1,7 @@
 /** @file
  * Common data structures and definitions for Proxy Verifier tools.
  *
- * Copyright 2022, Verizon Media
+ * Copyright 2026, Verizon Media
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -66,6 +66,7 @@ public:
   bool _wait_for_continue = false;
   bool _last_data_frame = false;
   bool _wait_for_response_after_100_continue = false;
+  bool _received_response_headers = false;
   std::string _key;
 
   nghttp2_nv *_trailer_to_send = nullptr;
@@ -144,6 +145,18 @@ public:
 
   /** Delete global instances. */
   static void terminate();
+
+  /** Emit aggregate HTTP/2 replay diagnostics gathered across client sessions.
+   *
+   * @return Summary diagnostics for the completed replay.
+   */
+  static swoc::Errata summarize_replay_metrics();
+
+  /** Return the replay target currently associated with this session.
+   *
+   * @return The target endpoint string used for replay diagnostics.
+   */
+  std::string const &get_replay_target() const;
 
   /** Perform the HTTP/2 (nghttp2) configuration for a client connection. */
   swoc::Errata client_session_init();
@@ -240,6 +253,32 @@ private:
   swoc::Errata submit_goaway_frame(H2StreamState *stream_state, H2Frame prev_frame);
 
 private:
+  struct DrainWindow
+  {
+    ssize_t bytes_received = 0;
+    size_t streams_completed = 0;
+    size_t inflight_before = 0;
+    size_t inflight_after = 0;
+
+    bool
+    made_progress() const
+    {
+      return bytes_received > 0 || streams_completed > 0;
+    }
+  };
+
+  void begin_replay_diagnostics(swoc::IPEndpoint const *real_target);
+  void note_replay_receive_progress();
+  void record_no_progress_window(std::chrono::milliseconds duration);
+  swoc::Rv<DrainWindow> drain_receive_window(
+      std::chrono::milliseconds timeout,
+      swoc::TextView context);
+  void append_stuck_stream_summary(
+      swoc::Errata &errata,
+      swoc::TextView context,
+      size_t consecutive_no_progress_windows) const;
+
+private:
   /// Whether this session is for a listening server.
   bool _is_server = false;
 
@@ -272,4 +311,8 @@ private:
 
   /// The set of streams which have completed already.
   std::unordered_set<std::string> _finished_streams;
+  std::string m_target_endpoint;
+  std::chrono::time_point<std::chrono::steady_clock> m_session_start;
+  std::chrono::time_point<std::chrono::steady_clock> m_last_progress_time;
+  std::chrono::milliseconds m_no_progress_window_time{0};
 };
