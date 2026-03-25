@@ -22,6 +22,35 @@ cleanup()
   echo "Stopped ${role} monitor. Logs are in ${output_dir}"
 }
 
+extract_monitored_peer_ports()
+{
+  local pid=$1
+  ps -p "${pid}" -o args= | python3 - <<'PY'
+import shlex
+import sys
+
+args = shlex.split(sys.stdin.read().strip())
+ports = []
+for index, arg in enumerate(args):
+    if arg in ("--connect-http", "--connect-https") and index + 1 < len(args):
+        endpoints = args[index + 1]
+    elif arg.startswith("--connect-http="):
+        endpoints = arg.split("=", 1)[1]
+    elif arg.startswith("--connect-https="):
+        endpoints = arg.split("=", 1)[1]
+    else:
+        continue
+    for endpoint in endpoints.split(","):
+        endpoint = endpoint.strip()
+        if not endpoint or ":" not in endpoint:
+            continue
+        port = endpoint.rsplit(":", 1)[1]
+        if port.isdigit():
+            ports.append(port)
+print(" ".join(ports))
+PY
+}
+
 capture_process_snapshot()
 {
   local pid=$1
@@ -48,28 +77,149 @@ capture_pidstat_snapshot()
   fi
 }
 
+socket_summary_from_ss_pid()
+{
+  local pid=$1
+  ss -tanp 2>/dev/null | python3 - "${pid}" <<'PY'
+import collections
+import sys
+
+pid = sys.argv[1]
+matches = 0
+peer_ports = collections.Counter()
+states = collections.Counter()
+
+def endpoint_port(endpoint: str) -> str:
+    endpoint = endpoint.strip()
+    if ":" not in endpoint:
+        return ""
+    return endpoint.rsplit(":", 1)[1].strip("[]")
+
+for line in sys.stdin:
+    if f"pid={pid}," not in line:
+        continue
+    parts = line.split()
+    if len(parts) < 5:
+        continue
+    matches += 1
+    states[parts[0]] += 1
+    peer_port = endpoint_port(parts[4])
+    if peer_port:
+        peer_ports[peer_port] += 1
+
+print("source ss-pid")
+print("matching-connections", matches)
+for state in sorted(states):
+    print("state", state, states[state])
+for port in sorted(peer_ports, key=lambda value: int(value)):
+    print("peer-port", port, peer_ports[port])
+sys.exit(0 if matches > 0 else 1)
+PY
+}
+
+socket_summary_from_lsof()
+{
+  local pid=$1
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -Pan -p "${pid}" -iTCP -n 2>/dev/null | python3 - <<'PY'
+import collections
+import re
+import sys
+
+matches = 0
+peer_ports = collections.Counter()
+states = collections.Counter()
+
+def endpoint_port(endpoint: str) -> str:
+    endpoint = endpoint.strip()
+    if ":" not in endpoint:
+        return ""
+    return endpoint.rsplit(":", 1)[1].strip("[]")
+
+for line in sys.stdin:
+    if " TCP " not in line:
+        continue
+    name = line.split(" TCP ", 1)[1].strip()
+    state = "UNKNOWN"
+    state_match = re.search(r" \(([^)]+)\)$", name)
+    if state_match:
+        state = state_match.group(1)
+        name = name[:state_match.start()]
+    local_endpoint, peer_endpoint = name, ""
+    if "->" in name:
+        local_endpoint, peer_endpoint = name.split("->", 1)
+    matches += 1
+    states[state] += 1
+    peer_port = endpoint_port(peer_endpoint)
+    if peer_port:
+        peer_ports[peer_port] += 1
+
+print("source lsof-pid")
+print("matching-connections", matches)
+for state in sorted(states):
+    print("state", state, states[state])
+for port in sorted(peer_ports, key=lambda value: int(value)):
+    print("peer-port", port, peer_ports[port])
+sys.exit(0 if matches > 0 else 1)
+PY
+}
+
+socket_summary_from_port_filter()
+{
+  local monitored_peer_ports=$1
+  MONITORED_PEER_PORTS="${monitored_peer_ports}" ss -tanH 2>/dev/null | python3 - <<'PY'
+import collections
+import os
+import sys
+
+configured_ports = {
+    port for port in os.environ.get("MONITORED_PEER_PORTS", "").split() if port
+}
+matches = 0
+peer_ports = collections.Counter()
+states = collections.Counter()
+
+def endpoint_port(endpoint: str) -> str:
+    endpoint = endpoint.strip()
+    if ":" not in endpoint:
+        return ""
+    return endpoint.rsplit(":", 1)[1].strip("[]")
+
+for line in sys.stdin:
+    parts = line.split()
+    if len(parts) < 4:
+        continue
+    state = parts[0]
+    peer_endpoint = parts[4] if len(parts) > 4 else ""
+    peer_port = endpoint_port(peer_endpoint)
+    if peer_port not in configured_ports:
+        continue
+    matches += 1
+    states[state] += 1
+    peer_ports[peer_port] += 1
+
+print("source ss-port-filter")
+print("configured-peer-ports", len(configured_ports))
+print("matching-connections", matches)
+for state in sorted(states):
+    print("state", state, states[state])
+for port in sorted(peer_ports, key=lambda value: int(value)):
+    print("peer-port", port, peer_ports[port])
+PY
+}
+
 capture_socket_snapshot()
 {
   local pid=$1
+  local monitored_peer_ports
+  monitored_peer_ports=$(extract_monitored_peer_ports "${pid}")
   {
     echo "=== $(date -Is) pid=${pid} ==="
-    ss -tanp | awk -v pid="${pid}" '
-      $0 ~ ("pid=" pid ",") {
-        matches++
-        split($5, peer, ":")
-        peer_port = peer[length(peer)]
-        peer_ports[peer_port]++
-        states[$1]++
-      }
-      END {
-        print "matching-connections", matches + 0
-        for (state in states) {
-          print "state", state, states[state]
-        }
-        for (port in peer_ports) {
-          print "peer-port", port, peer_ports[port]
-        }
-      }' | sort -V
+    if ! socket_summary_from_ss_pid "${pid}"; then
+      if ! socket_summary_from_lsof "${pid}"; then
+        socket_summary_from_port_filter "${monitored_peer_ports}"
+      fi
+    fi
     echo
   } >> "${output_dir}/sockets.log"
 }

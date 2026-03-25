@@ -80,6 +80,15 @@ request_path(HttpHeader const &request)
   return request._url;
 }
 
+HttpHeader const &
+request_for_diagnostics(H2StreamState const &stream_state)
+{
+  if (stream_state._specified_request != nullptr) {
+    return *stream_state._specified_request;
+  }
+  return *stream_state._request_from_client;
+}
+
 size_t
 final_drain_bucket_index(milliseconds duration)
 {
@@ -473,7 +482,7 @@ H2Session::append_stuck_stream_summary(
       session_age.count(),
       last_progress_age.count());
   for (auto const &[stream_id, stream_state] : _stream_map) {
-    auto const &request = *stream_state->_request_from_client;
+    auto const &request = request_for_diagnostics(*stream_state);
     auto const stream_age = duration_cast<milliseconds>(now - stream_state->_stream_start);
     auto const method = request._method.empty() ? TextView{"<missing>"} : request._method;
     auto const authority =
@@ -1485,7 +1494,7 @@ finalize_stream(H2Session *session_data, int32_t stream_id)
   }
 
   if (elapsed_ms > Transaction_Delay_Cutoff) {
-    auto const &request_from_client = *stream_state._request_from_client;
+    auto const &request_from_client = request_for_diagnostics(stream_state);
     auto const target = session_data->get_replay_target().empty() ?
                             "<unassigned>" :
                             session_data->get_replay_target().c_str();
@@ -1994,6 +2003,7 @@ H2Session::write(HttpHeader const &hdr)
   } else {
     new_stream_state = std::make_shared<H2StreamState>();
     stream_state = new_stream_state.get();
+    stream_state->_specified_request = &hdr;
   }
 
   if (hdr.is_request()) {
