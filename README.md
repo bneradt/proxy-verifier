@@ -1806,8 +1806,8 @@ cmake --build --preset dev-external --parallel
 ```
 
 The checked-in `dev-external` preset assumes `/opt/pv_libs`, which matches the
-provided Dockerfiles under `docker/rockylinux_9`, `docker/rockylinux_10`, and
-`docker/ubuntu_24.04`. Thus:
+provided Dockerfiles under `docker/rockylinux_8`, `docker/rockylinux_9`,
+etc.. Thus:
 
 ```bash
 http3_libs_dir=/opt/pv_libs
@@ -1820,8 +1820,11 @@ cmake --build --preset dev-external --parallel
 
 #### Development Docker Images
 
-The Dockerfiles under `docker/rockylinux_9`, `docker/rockylinux_10`, and
-`docker/ubuntu_24.04` are for development workflows, not deployment images.
+The Dockerfiles under `docker/rockylinux_8`, `docker/rockylinux_9`,
+`docker/rockylinux_10`, and `docker/ubuntu_24.04` are for development
+workflows, not deployment images. For deployment, using the statically
+linked binaries associated with the GitHub releases is the easiest
+path for most people.
 
 Each image build has two phases:
 
@@ -1922,6 +1925,10 @@ On Linux this targets a fully static executable. On macOS it links Proxy
 Verifier and its third-party dependencies via static archives while leaving the
 system libraries dynamic. After the install step, the staged release binaries
 land under `/tmp/proxy-verifier-v<version>/<platform>`.
+
+For Linux portable release artifacts on x86_64, use the `docker/rockylinux_8`
+image so the static runtime and bundled dependencies are built against a
+reasonably old userspace baseline ensuring greater portability.
 
 The portable presets explicitly use `-O2 -DNDEBUG` rather than the toolchain's
 default `Release` optimization level so the staged binaries stay conservative
