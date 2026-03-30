@@ -160,19 +160,17 @@ http2_field_is_hop_by_hop(HttpFields const &fields, swoc::TextView name)
   }
 
   if (strcasecmp(name, HttpHeader::FIELD_TE) == 0) {
-    bool saw_te = false;
     for (auto const &[field_name, field_value] : fields._fields_sequence) {
       if (strcasecmp(field_name, name) != 0) {
         continue;
       }
-      saw_te = true;
       auto trimmed_value = field_value;
       trimmed_value.trim_if(&isspace);
       if (strcasecmp(trimmed_value, "trailers") != 0) {
         return true;
       }
     }
-    return saw_te;
+    return false;
   }
 
   for (auto const &[field_name, field_value] : fields._fields_sequence) {

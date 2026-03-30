@@ -726,6 +726,48 @@ H2Session::run_transactions(
       errata.note(S_DIAG, "HTTP/2 in-flight stream cap set to {}.", logged_stream_cap);
     }
 
+    auto drain_send_phase_backpressure =
+        [&](std::string_view context, size_t target_in_flight, bool stop_after_stream_completion) {
+          size_t no_progress_windows = 0;
+          while (!this->_stream_map.empty() && this->_stream_map.size() > target_in_flight) {
+            auto &&[window_progress, window_errata] =
+                drain_receive_window(Poll_Timeout, context);
+            txn_errata.note(std::move(window_errata));
+            if (!txn_errata.is_ok()) {
+              errata.note(std::move(txn_errata));
+              log_h2_replay_metrics(0ms);
+              record_session_summary(0ms);
+              return false;
+            }
+
+            if (window_progress.bytes_received > 0) {
+              send_phase_bytes_drained += window_progress.bytes_received;
+            }
+            if (window_progress.made_progress()) {
+              no_progress_windows = 0;
+            } else {
+              ++no_progress_windows;
+              ++total_no_progress_windows;
+              if (no_progress_windows >= H2NoProgressTimeoutBudget) {
+                session_was_stuck = true;
+                append_stuck_stream_summary(
+                    txn_errata,
+                    std::string{context} + " drain",
+                    no_progress_windows);
+                this->close();
+                errata.note(std::move(txn_errata));
+                log_h2_replay_metrics(0ms);
+                record_session_summary(0ms);
+                return false;
+              }
+            }
+            if (stop_after_stream_completion && window_progress.streams_completed > 0) {
+              break;
+            }
+          }
+          return true;
+        };
+
     bool print_once = true;
     auto const start_time = ClockType::now();
     while (this->request_has_outstanding_stream_dependencies(txn._req)) {
@@ -807,6 +849,15 @@ H2Session::run_transactions(
       errata.sink();
       break;
     }
+    if (this->_stream_map.size() >= effective_in_flight_stream_cap) {
+      auto const pre_submit_target_in_flight = effective_in_flight_stream_cap - 1;
+      if (!drain_send_phase_backpressure(
+              "pre-submit backpressure",
+              pre_submit_target_in_flight,
+              false)) {
+        return errata;
+      }
+    }
     txn_errata.note(this->run_transaction(txn));
     if (!txn_errata.is_ok()) {
       txn_errata.note(S_ERROR, R"(Failed HTTP/2 transaction with key: {})", key);
@@ -840,43 +891,9 @@ H2Session::run_transactions(
     }
 
     if (this->_stream_map.size() >= effective_in_flight_stream_cap) {
-      size_t no_progress_windows = 0;
       auto const target_in_flight = std::max<size_t>(1, effective_in_flight_stream_cap / 2);
-      while (!this->_stream_map.empty() && this->_stream_map.size() > target_in_flight) {
-        auto &&[window_progress, window_errata] =
-            drain_receive_window(Poll_Timeout, "send-phase backpressure");
-        txn_errata.note(std::move(window_errata));
-        if (!txn_errata.is_ok()) {
-          errata.note(std::move(txn_errata));
-          log_h2_replay_metrics(0ms);
-          record_session_summary(0ms);
-          return errata;
-        }
-
-        if (window_progress.bytes_received > 0) {
-          send_phase_bytes_drained += window_progress.bytes_received;
-        }
-        if (window_progress.made_progress()) {
-          no_progress_windows = 0;
-        } else {
-          ++no_progress_windows;
-          ++total_no_progress_windows;
-          if (no_progress_windows >= H2NoProgressTimeoutBudget) {
-            session_was_stuck = true;
-            append_stuck_stream_summary(
-                txn_errata,
-                "send-phase backpressure drain",
-                no_progress_windows);
-            this->close();
-            errata.note(std::move(txn_errata));
-            log_h2_replay_metrics(0ms);
-            record_session_summary(0ms);
-            return errata;
-          }
-        }
-        if (window_progress.streams_completed > 0) {
-          break;
-        }
+      if (!drain_send_phase_backpressure("send-phase backpressure", target_in_flight, true)) {
+        return errata;
       }
     }
     if (this->sent_goaway_frame) {
