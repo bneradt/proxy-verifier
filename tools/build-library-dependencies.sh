@@ -11,8 +11,18 @@ fail() {
   exit 1
 }
 
+usage() {
+  cat <<'EOF'
+Usage: tools/build-library-dependencies.sh [--portable] <install-dir>
+
+Build QUIC/HTTP3 library dependencies into <install-dir>.
+
+Use --portable to add conservative Linux amd64 baseline flags suitable for
+portable release builds.
+EOF
+}
+
 set -euo pipefail
-set -x
 
 OPENSSL_TAG=openssl-3.5.5
 NGHTTP3_TAG=v1.15.0
@@ -21,6 +31,55 @@ NGHTTP2_TAG=v1.68.0
 
 os=$(uname)
 [ "${os}" = "Linux" ] || [ "${os}" = "Darwin" ] || fail "Unrecognized OS: ${os}"
+arch=$(uname -m)
+
+portable_build=false
+args=()
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    --portable)
+      portable_build=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      usage
+      fail "Unrecognized option: $1"
+      ;;
+    *)
+      args+=("$1")
+      ;;
+  esac
+  shift
+done
+
+if [ $# -gt 0 ]
+then
+  args+=("$@")
+fi
+
+[ "${#args[@]}" -eq 1 ] || {
+  usage
+  fail "Please provide a directory in which to install the libraries."
+}
+install_dir=${args[0]}
+
+set -x
+
+portable_cpu_flags=""
+if [ "${portable_build}" = true ] &&
+   [ "${os}" = "Linux" ] &&
+   { [ "${arch}" = "x86_64" ] || [ "${arch}" = "amd64" ]; }
+then
+  portable_cpu_flags="-march=x86-64 -mtune=generic"
+fi
 
 for tool in git make pkg-config autoreconf autoconf automake
 do
@@ -34,11 +93,15 @@ else
   num_threads=$(sysctl -n hw.logicalcpu)
 fi
 
-[ $# -eq 1 ] || fail "Please provide a directory in which to install the libraries."
-install_dir=$1
-
 echo
 echo "Building with ${num_threads} threads, installing in ${install_dir}"
+if [ -n "${portable_cpu_flags}" ]
+then
+  echo "Using conservative amd64 baseline flags: ${portable_cpu_flags}"
+elif [ "${portable_build}" = true ]
+then
+  echo "Portable mode requested; no additional CPU baseline flags are needed for ${os}/${arch}."
+fi
 echo
 
 SUDO=""
@@ -63,6 +126,28 @@ chmod_with_permissions() {
 }
 
 chmod_with_permissions "${install_dir}"
+
+append_env_flags() {
+  local var_name=$1
+  local extra_flags=$2
+  local current_value=${!var_name-}
+
+  if [ -z "${extra_flags}" ]
+  then
+    return
+  fi
+
+  if [ -n "${current_value}" ]
+  then
+    printf -v "${var_name}" '%s %s' "${current_value}" "${extra_flags}"
+  else
+    printf -v "${var_name}" '%s' "${extra_flags}"
+  fi
+  export "${var_name}"
+}
+
+append_env_flags CFLAGS "${portable_cpu_flags}"
+append_env_flags CXXFLAGS "${portable_cpu_flags}"
 
 mkdir -p "${install_dir}"
 repo_dir=$(mktemp -d /var/tmp/http3_dependency_repos_XXXXXX)

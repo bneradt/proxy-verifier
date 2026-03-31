@@ -131,7 +131,7 @@ endfunction()
 
 function(_pv_collect_bootstrap_environment_modifications OUT_VAR)
   set(options)
-  set(oneValueArgs PKG_CONFIG_PATH LDFLAGS)
+  set(oneValueArgs PKG_CONFIG_PATH CFLAGS CXXFLAGS LDFLAGS)
   set(multiValueArgs)
   cmake_parse_arguments(PV "${options}" "${oneValueArgs}" "${multiValueArgs}"
                         ${ARGN})
@@ -161,9 +161,27 @@ function(_pv_collect_bootstrap_environment_modifications OUT_VAR)
     list(APPEND _pv_modifications "PKG_CONFIG_PATH=set:${PV_PKG_CONFIG_PATH}")
   endif()
 
-  if(PV_LDFLAGS)
-    list(APPEND _pv_modifications "LDFLAGS=set:${PV_LDFLAGS}")
-  endif()
+  foreach(_pv_flag_name CFLAGS CXXFLAGS LDFLAGS)
+    set(_pv_flag_value "")
+    if(DEFINED ENV{${_pv_flag_name}} AND NOT "$ENV{${_pv_flag_name}}" STREQUAL
+                                         "")
+      set(_pv_flag_value "$ENV{${_pv_flag_name}}")
+    endif()
+
+    if(PV_${_pv_flag_name})
+      if(_pv_flag_value)
+        string(APPEND _pv_flag_value " ${PV_${_pv_flag_name}}")
+      else()
+        set(_pv_flag_value "${PV_${_pv_flag_name}}")
+      endif()
+    endif()
+
+    if(_pv_flag_value)
+      string(REPLACE " " "\\ " _pv_flag_value_escaped "${_pv_flag_value}")
+      list(APPEND _pv_modifications
+           "${_pv_flag_name}=set:${_pv_flag_value_escaped}")
+    endif()
+  endforeach()
 
   set(${OUT_VAR}
       "${_pv_modifications}"
@@ -209,13 +227,25 @@ function(_pv_add_bootstrap_projects)
     set(_pv_jobs 1)
   endif()
 
-  _pv_collect_bootstrap_environment_modifications(_pv_base_env_modifications)
   _pv_collect_bootstrap_environment_modifications(
-    _pv_ngtcp2_configure_env_modifications PKG_CONFIG_PATH
-    "${PV_OPENSSL_ROOT}/lib/pkgconfig:${PV_NGHTTP3_ROOT}/lib/pkgconfig" LDFLAGS
+    _pv_base_env_modifications CFLAGS "${PV_PORTABLE_C_FLAGS}" CXXFLAGS
+    "${PV_PORTABLE_CXX_FLAGS}")
+  _pv_collect_bootstrap_environment_modifications(
+    _pv_ngtcp2_configure_env_modifications
+    CFLAGS
+    "${PV_PORTABLE_C_FLAGS}"
+    CXXFLAGS
+    "${PV_PORTABLE_CXX_FLAGS}"
+    PKG_CONFIG_PATH
+    "${PV_OPENSSL_ROOT}/lib/pkgconfig:${PV_NGHTTP3_ROOT}/lib/pkgconfig"
+    LDFLAGS
     "-Wl,-rpath,${PV_OPENSSL_ROOT}/lib")
   _pv_collect_bootstrap_environment_modifications(
     _pv_nghttp2_configure_env_modifications
+    CFLAGS
+    "${PV_PORTABLE_C_FLAGS}"
+    CXXFLAGS
+    "${PV_PORTABLE_CXX_FLAGS}"
     PKG_CONFIG_PATH
     "${PV_OPENSSL_ROOT}/lib/pkgconfig:${PV_NGTCP2_ROOT}/lib/pkgconfig:${PV_NGHTTP3_ROOT}/lib/pkgconfig"
   )

@@ -41,6 +41,35 @@ option(PV_ENABLE_ASAN
        "Build the verifier binaries with AddressSanitizer instrumentation." OFF)
 option(PV_RELEASE_LAYOUT
        "Install release artifacts into a platform-specific bindir." OFF)
+option(
+  BUILD_PORTABLE
+  "Enable portable build settings such as conservative Linux amd64 ISA flags."
+  OFF)
+
+function(pv_detect_portable_amd64_flags out_var)
+  set(_pv_flags "")
+  if(BUILD_PORTABLE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pv_portable_arch)
+    if(_pv_portable_arch MATCHES "^(x86_64|amd64)$")
+      set(_pv_flags "-march=x86-64 -mtune=generic")
+    endif()
+  endif()
+
+  set(${out_var}
+      "${_pv_flags}"
+      PARENT_SCOPE)
+endfunction()
+
+function(_pv_add_portable_compile_options language flags)
+  if(NOT flags)
+    return()
+  endif()
+
+  separate_arguments(_pv_flag_list NATIVE_COMMAND "${flags}")
+  foreach(_pv_flag IN LISTS _pv_flag_list)
+    add_compile_options("$<$<COMPILE_LANGUAGE:${language}>:${_pv_flag}>")
+  endforeach()
+endfunction()
 
 set(PV_DEPS_ROOT
     ""
@@ -64,6 +93,14 @@ set(PV_RELEASE_TARGET
     ""
     CACHE STRING
           "Release artifact target name such as linux-amd64 or darwin-arm64.")
+
+pv_detect_portable_amd64_flags(PV_PORTABLE_C_FLAGS)
+set(PV_PORTABLE_CXX_FLAGS "${PV_PORTABLE_C_FLAGS}")
+
+if(BUILD_PORTABLE)
+  _pv_add_portable_compile_options(C "${PV_PORTABLE_C_FLAGS}")
+  _pv_add_portable_compile_options(CXX "${PV_PORTABLE_CXX_FLAGS}")
+endif()
 
 function(pv_detect_release_target out_var)
   string(TOLOWER "${CMAKE_SYSTEM_NAME}" _pv_release_os)

@@ -13,7 +13,6 @@
 #include "core/YamlParser.h"
 #include "core/proxy_protocol_util.h"
 
-#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <csignal>
@@ -654,7 +653,7 @@ TF_Serve_Connection(std::thread *t)
         break;
       }
 
-      swoc::LocalBufferWriter<MAX_HDR_SIZE> w;
+      auto w = make_thread_local_buffer_writer<MAX_HDR_SIZE>();
       auto &&[req_hdr, read_header_errata] = thread_info.m_session->read_and_parse_request(w);
       thread_errata.note(std::move(read_header_errata));
       if (!thread_errata.is_ok()) {

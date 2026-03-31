@@ -1349,7 +1349,9 @@ Session::write(HttpHeader const &hdr)
 {
   // 1. header.serialize, write it out
   // 2. transmit the body
-  swoc::LocalBufferWriter<MAX_HDR_SIZE> w;
+  // Keep the large header buffer off the worker-thread stack without
+  // allocating on every call.
+  auto w = make_thread_local_buffer_writer<MAX_HDR_SIZE>();
   swoc::Rv<ssize_t> zret{-1};
 
   zret.errata() = hdr.serialize(w);
@@ -1824,7 +1826,7 @@ Session::run_transaction(Txn const &json_txn)
     // purposes, explicitly make sure it is set with the expected value we have
     // from the client-request.
     rsp_hdr_from_wire.set_key(key);
-    swoc::LocalBufferWriter<MAX_HDR_SIZE> w;
+    auto w = make_thread_local_buffer_writer<MAX_HDR_SIZE>();
     errata.note(S_DIAG, "Reading response header.");
 
     auto read_result{this->read_headers(w)};

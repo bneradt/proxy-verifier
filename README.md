@@ -1811,9 +1811,12 @@ the [Releases](https://github.com/yahoo/proxy-verifier/releases) page. If you do
 not need your own customized build of Proxy Verifier, the easiest way to start
 using it is to simply download the proxy-verifier `tar.gz` for the desired
 release, untar it on the desired box, and copy the `verifier-client` and
-`verifier-server` binaries to a convenient location from which to run them.  The
-Linux binaries should run on Ubuntu, Alma/CentOS/Fedora/RHEL, FreeBSD, and other
-Linux flavors.
+`verifier-server` binaries to a convenient location from which to run them.
+
+On Linux, these release binaries are built as statically linked musl
+executables. They do not depend on glibc or `libnss_*` shared libraries at
+runtime, although hostname resolution still consults normal system files such
+as `/etc/hosts` and `/etc/resolv.conf`.
 
 ### Building from Source
 
@@ -1881,8 +1884,8 @@ cmake --build --preset dev-external --parallel
 ```
 
 The checked-in `dev-external` preset assumes `/opt/pv_libs`, which matches the
-provided Dockerfiles under `docker/rockylinux_8`, `docker/rockylinux_9`,
-etc.. Thus:
+provided Dockerfiles under `docker/alpine_3.20`, `docker/rockylinux_8`,
+`docker/rockylinux_9`, etc. Thus:
 
 ```bash
 http3_libs_dir=/opt/pv_libs
@@ -1895,21 +1898,21 @@ cmake --build --preset dev-external --parallel
 
 #### Development Docker Images
 
-The Dockerfiles under `docker/rockylinux_8`, `docker/rockylinux_9`,
-`docker/rockylinux_10`, and `docker/ubuntu_24.04` are for development
-workflows, not deployment images. For deployment, using the statically
-linked binaries associated with the GitHub releases is the easiest
+The Dockerfiles under `docker/alpine_3.20`, `docker/rockylinux_8`,
+`docker/rockylinux_9`, `docker/rockylinux_10`, and `docker/ubuntu_24.04` are
+for development workflows, not deployment images. For deployment, using the
+statically linked binaries associated with the GitHub releases is the easiest
 path for most people.
 
-Each image build has two phases:
+Each image build has two stages:
 
-* `pv-libs-builder` compiles OpenSSL, nghttp3, ngtcp2, and nghttp2 and installs them into `/opt/pv_libs`.
-* The final `dev` stage copies `/opt/pv_libs` and installs the full toolchain
-  needed to build Proxy Verifier, run unit tests and AuTests, and generate
-  release binaries. Tooling for the dev image lives in the `/opt/pv-venv`
-  virtual environment, which provides `cmake`, `ninja`, and `uv`, all available
-  in the `/opt/pv_libs/bin` added to the `PATH` per the Dockerfile `ENV`
-  configuration.
+* `pv-libs-builder-base` installs the shared toolchain and creates the
+  `/opt/pv-venv` virtual environment with `cmake`, `ninja`, and `uv`.
+* `dev` compiles OpenSSL, nghttp3, ngtcp2, and nghttp2 into `/opt/pv_libs` and
+  is also the final development image.
+
+Tooling for the dev image lives in the `/opt/pv-venv` virtual environment and
+is added to the `PATH` by the Dockerfile `ENV` configuration.
 
 The Dockerfiles are self-contained, so you can build them from within each
 image directory. By default the builder stage clones
@@ -1975,7 +1978,21 @@ target used to build the release binaries in the artifacts of a release. Use
 `/opt/pv_libs` and `portable-bootstrap` when CMake should build those
 dependencies as part of the portable build. These presets automatically map the
 current platform to a release directory name such as `linux-amd64`,
-`linux-arm64`, or `darwin-arm64`.
+`linux-arm64`, or `darwin-arm64`, and they set `BUILD_PORTABLE=ON`.
+
+For release builds, it is recommended that you use
+`tools/build-portable-binaries`, which uses the `portable-bootstrap` preset
+underneath:
+
+```bash
+./tools/build-portable-binaries
+```
+
+It also accepts `portable-external` if you want to use a prebuilt
+`/opt/pv_libs` dependency directory. In that case, first build the dependency
+tree with `tools/build-library-dependencies.sh --portable /opt/pv_libs` so the
+bundled QUIC/TLS libraries use the same conservative Linux amd64 baseline, and
+then run:
 
 ```
 cmake --preset portable-external
@@ -1983,27 +2000,25 @@ cmake --build --preset portable-external --parallel
 cmake --install build/portable-external --strip
 ```
 
-Run `cmake --install build/<portable-preset> --strip` to stage stripped binaries
-under `/tmp/proxy-verifier-v<version>/<platform>`.
+Run `cmake --install build/<portable-preset> --strip` to stage stripped
+binaries under `/tmp/proxy-verifier-v<version>/<platform>`.
 
 `--strip` is used to shrink the binaries for optimal distribution. The binary
 artifacts in each of the Proxy Verifier release are stripped for this reason.
 This makes debugging issues much harder, of course, since symbols are removed
 from the binaries. Omit `--strip` if size is less of an issue for you.
 
-For the common case, `tools/build-portable-binaries` wraps the configure, build,
-and stripped install steps and then prints the resulting binary paths. It
-defaults to `portable-bootstrap` and also accepts `portable-external` if you want
-to use an `/opt/pv_libs` prebuilt dependency directory.
+On Linux, build portable release artifacts in the `docker/alpine_3.20` image so
+the resulting binaries are static musl executables without a glibc or
+`libnss_*` runtime dependency. DNS still consults `/etc/hosts` and
+`/etc/resolv.conf`. On macOS it links Proxy Verifier and its third-party
+dependencies via static archives while leaving the system libraries dynamic.
+After the install step, the staged release binaries land under
+`/tmp/proxy-verifier-v<version>/<platform>`.
 
-On Linux this targets a fully static executable. On macOS it links Proxy
-Verifier and its third-party dependencies via static archives while leaving the
-system libraries dynamic. After the install step, the staged release binaries
-land under `/tmp/proxy-verifier-v<version>/<platform>`.
-
-For Linux portable release artifacts on x86_64, use the `docker/rockylinux_8`
-image so the static runtime and bundled dependencies are built against a
-reasonably old userspace baseline ensuring greater portability.
+For Linux portable release artifacts on x86_64, the portable build also pins
+`-march=x86-64 -mtune=generic` for Proxy Verifier and its bootstrapped QUIC/TLS
+dependencies so the release binaries stay runnable on older amd64 systems.
 
 The portable presets explicitly use `-O2 -DNDEBUG` rather than the toolchain's
 default `Release` optimization level so the staged binaries stay conservative

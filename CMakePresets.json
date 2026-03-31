@@ -51,6 +51,7 @@
         "CMAKE_C_FLAGS_RELEASE": "-O2 -DNDEBUG",
         "CMAKE_CXX_FLAGS_RELEASE": "-O2 -DNDEBUG",
         "CMAKE_INSTALL_PREFIX": "/tmp",
+        "BUILD_PORTABLE": "ON",
         "PV_RELEASE_LAYOUT": "ON",
         "PV_STATIC_BUILD": "ON"
       }

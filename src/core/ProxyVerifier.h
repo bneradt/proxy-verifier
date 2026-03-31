@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <csignal>
 #include <condition_variable>
@@ -42,6 +43,23 @@ constexpr swoc::Errata::Severity S_ERROR{4};
  * @return 0 on success, non-zero on failure.
  */
 swoc::Rv<int> block_sigpipe();
+
+/** Create a thread-local buffer writer backed by fixed-size storage.
+ *
+ * This is useful for keeping large temporary buffers off pthread stacks on
+ * platforms such as musl, while also avoiding per-call heap allocation.
+ *
+ * @tparam N The size of the backing buffer.
+ *
+ * @return A writer bound to thread-local storage for the current thread.
+ */
+template <size_t N>
+swoc::FixedBufferWriter
+make_thread_local_buffer_writer()
+{
+  thread_local std::array<char, N> storage;
+  return swoc::FixedBufferWriter{storage.data(), storage.size()};
+}
 
 /** Configure logging.
  *
