@@ -36,6 +36,7 @@ if [ $? -eq 0 ]; then
     echo "uv detected!"
 
     recreate_venv=false
+    sync_venv=false
     if [ ! -d .venv ]; then
         recreate_venv=true
     elif ! .venv/bin/python3 --version &> /dev/null; then
@@ -44,11 +45,18 @@ if [ $? -eq 0 ]; then
     elif ! .venv/bin/autest --help &> /dev/null; then
         echo "The existing AuTest entry point is stale. Recreating the virtual environment."
         recreate_venv=true
+    elif ! uv sync --check --locked &> /dev/null; then
+        echo "The existing virtual environment does not match the locked dependencies. Syncing it."
+        sync_venv=true
     fi
 
     if [ "${recreate_venv}" = true ]; then
         rm -rf .venv
         echo "Installing a new virtual environment via uv"
+        sync_venv=true
+    fi
+
+    if [ "${sync_venv}" = true ]; then
 
         os_name=$(uname)
         if [ "${os_name}" == "Darwin" ]
@@ -71,7 +79,7 @@ if [ $? -eq 0 ]; then
           fi
         fi
 
-        uv sync
+        uv sync --locked
     else
         echo "Using the pre-existing virtual environment."
     fi

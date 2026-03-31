@@ -2089,13 +2089,14 @@ framework.
 **A note for macOS**: The Python virtual environment for these gold tests
 requires the [cryptograpy](https://github.com/pyca/cryptography) package as a
 dependency of the [pyOpenSSL](https://www.pyopenssl.org/en/stable/) package.
-uv will install this automatically, but the installation of the
+The build-generated `autest.sh` wrapper installs the test environment with
+`uv sync --locked`, but the installation of the
 `cryptography` package will require compiling certain c files against OpenSSL.
 macOS has its own SSL libraries which brew's version of OpenSSL does not
 replace, for understandable reasons. The building of `cryptography` will
 fail against the system's SSL libraries. To point the build to brew's OpenSSL
 libraries, the `autest.sh` script exports the following variables before
-running `uv`:
+running `uv sync --locked`:
 
 ```
 export LDFLAGS="-L/usr/local/opt/openssl/lib"
@@ -2106,7 +2107,7 @@ export PKG_CONFIG_PATH="/usr/local/opt/openssl/lib/pkgconfig"
 Thus if you stick with using the `autest.sh` script you do not need to worry
 about this. But if you install the test environment by hand rather than through the
 `autest.sh` script on macOS, then keep this in mind and export those variables
-before running `uv`.
+before running `uv sync --locked`.
 
 ## Usage
 
